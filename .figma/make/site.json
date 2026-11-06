@@ -1,0 +1,10 @@
+{
+  "description": "Rimbly helps university students practice with real past questions, battle peers, and grow their academic edge.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
