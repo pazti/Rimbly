@@ -149,7 +149,7 @@ function BrandMark() {
     <a className="brand" href="#/" aria-label="Rimbly home">
       <span className="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 48 48" role="img" aria-hidden="true">
-          <path d="M11 10.5h14.5c7.6 0 13.5 5.2 13.5 12.2 0 6.7-5.1 11.8-12.3 11.8H20v9.5h-9V10.5Zm9 8.6v8.8h5.1c3.6 0 5.8-2 5.8-4.5 0-2.6-2.2-4.3-5.8-4.3H20Z" />
+          <path d="M15 9h10.5C31.3 9 37 14 37 21.1c0 5.6-3.8 10.3-9.1 11.2L38 39h-8.9l-7.5-8.3h-2.6V39h-8V9Zm8 8v7.2h1.7c3.4 0 5.4-1.9 5.4-3.7 0-2-2-3.5-5.4-3.5H23Z" />
         </svg>
       </span>
       <span>Rimbly</span>
