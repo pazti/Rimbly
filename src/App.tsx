@@ -811,6 +811,18 @@ export default function App() {
             </section>
           </div>
 
+          <section className="founder-note" aria-labelledby="founder-note-title">
+            <p className="eyebrow">A note from the founder</p>
+            <h2 id="founder-note-title">The problem we’re here to solve.</h2>
+            <blockquote>
+              I built Rimbly around a simple problem: too many university students piece together
+              exam preparation from past questions scattered across chats and folders. Studying can
+              feel isolating, and it’s hard to know if you’re improving. We’re bringing course
+              practice and friendly competition into one place, so students can prepare with more
+              structure, build confidence, and climb together.
+            </blockquote>
+          </section>
+
           <section className="early-access">
             <span className="mini-spark" aria-hidden="true">
               <SparkIcon />

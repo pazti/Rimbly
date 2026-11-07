@@ -832,6 +832,29 @@ label small {
   font-size: 9px;
 }
 
+.founder-note {
+  width: min(720px, calc(100% - 36px));
+  margin: 0 auto 54px;
+  padding: 25px 0;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid #c9c5bf;
+}
+
+.founder-note h2 {
+  max-width: 520px;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.founder-note blockquote {
+  max-width: 680px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
 .early-access {
   width: min(720px, calc(100% - 36px));
   display: flex;
