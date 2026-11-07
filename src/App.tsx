@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { OfflinePage } from "./components/OfflinePage";
 import { getSubmissionErrorMessage } from "./lib/submission";
-import { insertSubmission } from "./lib/supabase";
+import { getTableCount, insertSubmission, supabase } from "./lib/supabase";
 
 const universities = [
   "Abia State University (ABSU)",
@@ -452,20 +452,55 @@ export default function App() {
     };
     window.addEventListener("hashchange", onHashChange);
 
-    const target = 1284;
+    let frameId: number | undefined;
+    const fallbackTarget = 1284;
     const start = performance.now();
     const duration = 1300;
 
     const tick = (time: number) => {
       const progress = Math.min((time - start) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      setCount(Math.round(1240 + (target - 1240) * eased));
-      if (progress < 1) requestAnimationFrame(tick);
+      setCount((current) => {
+        const currentBase = current && current > 1000 ? current : 1240;
+        return Math.round(currentBase + (fallbackTarget - currentBase) * eased);
+      });
+      if (progress < 1) {
+        frameId = requestAnimationFrame(tick);
+      }
     };
 
-    const frame = requestAnimationFrame(tick);
+    const loadLiveCount = async () => {
+      const { count: liveCount } = await getTableCount("waitlist");
+      if (typeof liveCount === "number") {
+        setCount(liveCount);
+        return;
+      }
+
+      frameId = requestAnimationFrame(tick);
+    };
+
+    void loadLiveCount();
+
+    if (!supabase) {
+      return () => {
+        if (frameId) cancelAnimationFrame(frameId);
+        window.removeEventListener("hashchange", onHashChange);
+      };
+    }
+
+    const channel = supabase.channel("waitlist-count");
+    channel.on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "waitlist" },
+      () => {
+        setCount((current) => current + 1);
+      },
+    );
+    void channel.subscribe();
+
     return () => {
-      cancelAnimationFrame(frame);
+      if (frameId) cancelAnimationFrame(frameId);
+      supabase.removeChannel(channel);
       window.removeEventListener("hashchange", onHashChange);
     };
   }, []);

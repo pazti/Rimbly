@@ -9,6 +9,20 @@ export const supabase = supabaseUrl && supabaseAnonKey
 
 export type SubmissionTable = "waitlist" | "suggestions" | "contributions";
 
+export async function getTableCount(table: SubmissionTable) {
+  if (!supabase) {
+    console.warn(`Supabase is not configured; skipping count lookup for ${table}.`);
+    return { count: null, error: null };
+  }
+
+  const { count, error } = await supabase.from(table).select("*", {
+    count: "exact",
+    head: true,
+  });
+
+  return { count, error };
+}
+
 export async function insertSubmission(
   table: SubmissionTable,
   payload: Record<string, string | number | boolean | null>,
