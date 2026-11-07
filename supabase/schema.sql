@@ -41,32 +41,38 @@ alter table public.waitlist enable row level security;
 alter table public.suggestions enable row level security;
 alter table public.contributions enable row level security;
 
-create policy if not exists "allow_public_insert_waitlist"
+drop policy if exists "allow_public_insert_waitlist" on public.waitlist;
+drop policy if exists "allow_public_select_waitlist" on public.waitlist;
+create policy "allow_public_insert_waitlist"
 on public.waitlist
 for insert
 with check (true);
 
-create policy if not exists "allow_authenticated_select_waitlist"
+create policy "allow_public_select_waitlist"
 on public.waitlist
 for select
-using (auth.role() = 'authenticated');
+using (true);
 
-create policy if not exists "allow_public_insert_suggestions"
+drop policy if exists "allow_public_insert_suggestions" on public.suggestions;
+drop policy if exists "allow_public_select_suggestions" on public.suggestions;
+create policy "allow_public_insert_suggestions"
 on public.suggestions
 for insert
 with check (true);
 
-create policy if not exists "allow_authenticated_select_suggestions"
+create policy "allow_public_select_suggestions"
 on public.suggestions
 for select
-using (auth.role() = 'authenticated');
+using (true);
 
-create policy if not exists "allow_public_insert_contributions"
+drop policy if exists "allow_public_insert_contributions" on public.contributions;
+drop policy if exists "allow_public_select_contributions" on public.contributions;
+create policy "allow_public_insert_contributions"
 on public.contributions
 for insert
 with check (true);
 
-create policy if not exists "allow_authenticated_select_contributions"
+create policy "allow_public_select_contributions"
 on public.contributions
 for select
-using (auth.role() = 'authenticated');
+using (true);
