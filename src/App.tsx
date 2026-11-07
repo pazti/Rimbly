@@ -5,7 +5,6 @@ import { getTableCount, insertSubmission, supabase } from "./lib/supabase";
 
 const universities = [
   "Abia State University (ABSU)",
-  "Abuja School of Nursing? not a university",
   "Adamawa State University, Mubi (ADSU)",
   "Adekunle Ajasin University, Akungba (AAUA)",
   "Afe Babalola University, Ado-Ekiti (ABUAD)",
