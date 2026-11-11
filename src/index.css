@@ -1,17 +1,17 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700;800;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800;900&display=swap");
 @import "tailwindcss";
 
 :root {
-  --bg: #f7f5f2;
+  --bg: #f4f1f8;
   --surface: #fff;
   --ink: #0f0f0f;
-  --muted: #525252;
-  --line: #d7d3cd;
+  --muted: #5f5a69;
+  --line: #ddd7e7;
   --purple: #6d28d9;
   --purple-dark: #5b21b6;
   --purple-pale: #eee7fc;
-  --amber: #f59e0b;
-  --amber-pale: #fff2ce;
+  --amber: var(--purple);
+  --amber-pale: var(--purple-pale);
   --green: #16a34a;
   --green-pale: #e3f6e7;
   --red: #dc2626;
@@ -78,7 +78,7 @@ textarea:focus-visible {
 h1,
 h2,
 h3 {
-  font-family: "Inter Tight", sans-serif;
+  font-family: "Outfit", sans-serif;
   letter-spacing: -0.04em;
 }
 .app-shell {
@@ -105,7 +105,7 @@ h3 {
   border: 0;
   background: none;
   font:
-    900 22px "Inter Tight",
+    900 22px "Outfit",
     sans-serif;
   letter-spacing: -0.04em;
 }
@@ -182,7 +182,7 @@ h3 {
 }
 .btn-amber {
   background: var(--amber);
-  color: var(--ink);
+  color: #fff;
 }
 .badge {
   width: max-content;
@@ -206,7 +206,7 @@ h3 {
 }
 .badge-amber {
   background: var(--amber-pale);
-  color: #8a5200;
+  color: var(--purple-dark);
 }
 .badge-green {
   background: var(--green-pale);
@@ -302,7 +302,7 @@ h3 {
   top: 0;
   z-index: 20;
   border-bottom: 2px solid var(--ink);
-  background: rgb(247 245 242 / 94%);
+  background: rgb(244 241 248 / 94%);
   backdrop-filter: blur(10px);
 }
 .topbar-inner {
@@ -317,7 +317,7 @@ h3 {
   position: absolute;
   left: 50%;
   font:
-    800 15px "Inter Tight",
+    800 15px "Outfit",
     sans-serif;
   transform: translateX(-50%);
 }
@@ -536,7 +536,7 @@ h3 {
   background: var(--blue-pale);
 }
 .quick-grid b {
-  font: 800 14px "Inter Tight";
+  font: 800 14px "Outfit";
 }
 .quick-grid small {
   margin-top: 3px;
@@ -570,10 +570,10 @@ h3 {
 }
 .stat-card.hot > span {
   background: var(--amber-pale);
-  color: #a86100;
+  color: var(--purple-dark);
 }
 .stat-card b {
-  font: 900 20px "Inter Tight";
+  font: 900 20px "Outfit";
 }
 .stat-card small {
   color: var(--muted);
@@ -623,7 +623,7 @@ h3 {
   margin-bottom: 5px;
 }
 .course-copy > strong {
-  font: 900 15px "Inter Tight";
+  font: 900 15px "Outfit";
 }
 .course-copy > small {
   overflow: hidden;
@@ -656,7 +656,7 @@ h3 {
   background: #eee7fc;
 }
 .recommend-card.amber {
-  background: #fff2ce;
+  background: var(--purple-pale);
 }
 .recommend-card > div {
   margin: 20px 0 16px;
@@ -814,7 +814,7 @@ h3 {
 }
 .mini-paper strong {
   margin-top: 5px;
-  font: 900 14px "Inter Tight";
+  font: 900 14px "Outfit";
 }
 .mini-paper small {
   color: var(--muted);
@@ -1226,7 +1226,7 @@ select {
   border: 1.5px solid var(--ink);
   border-radius: 9px;
   background: #fff;
-  font: 900 17px "Inter Tight";
+  font: 900 17px "Outfit";
 }
 .choice-row small {
   color: var(--muted);
@@ -1466,10 +1466,10 @@ select {
   font-size: 8px;
 }
 .battle-scorebar > div > span b {
-  font: 900 16px "Inter Tight";
+  font: 900 16px "Outfit";
 }
 .battle-scorebar > strong {
-  font: 900 11px "Inter Tight";
+  font: 900 11px "Outfit";
 }
 .result-hero {
   text-align: center;
@@ -1514,7 +1514,7 @@ select {
   background: #fff;
 }
 .score-ring strong {
-  font: 900 36px "Inter Tight";
+  font: 900 36px "Outfit";
 }
 .score-ring span {
   color: var(--muted);
@@ -1659,7 +1659,7 @@ select {
   flex: none;
   border: 1.5px solid var(--ink);
   border-radius: 9px;
-  font: 900 13px "Inter Tight";
+  font: 900 13px "Outfit";
 }
 .score-box.great {
   background: var(--green-pale);
@@ -1751,13 +1751,13 @@ select {
   align-items: center;
 }
 .battle-players b {
-  font: 900 24px "Inter Tight";
+  font: 900 24px "Outfit";
 }
 .battle-players small {
   font-size: 8px;
 }
 .battle-players em {
-  font: 900 10px "Inter Tight";
+  font: 900 10px "Outfit";
 }
 .active-battle > div:last-child {
   display: flex;
@@ -1909,14 +1909,14 @@ select {
   font-size: 10px;
 }
 .versus-result strong {
-  font: 900 30px "Inter Tight";
+  font: 900 30px "Outfit";
 }
 .versus-result small {
   color: var(--muted);
   font-size: 7px;
 }
 .versus-result em {
-  font: 900 10px "Inter Tight";
+  font: 900 10px "Outfit";
 }
 .rank-gain {
   display: flex;
@@ -2024,7 +2024,7 @@ select {
 }
 .place strong {
   margin-top: 7px;
-  font: 800 10px "Inter Tight";
+  font: 800 10px "Outfit";
 }
 .ranking-list {
   overflow: hidden;
@@ -2597,7 +2597,7 @@ select {
   border-radius: 50%;
   background: #fff;
   color: var(--purple);
-  font: 900 22px "Inter Tight";
+  font: 900 22px "Outfit";
 }
 .auth-orbit {
   position: absolute;
@@ -3047,7 +3047,7 @@ select {
   box-shadow: 0 0 0 2px var(--ink);
 }
 .coverage-ring strong {
-  font: 900 26px "Inter Tight";
+  font: 900 26px "Outfit";
 }
 .coverage-ring span {
   color: var(--muted);
@@ -3716,7 +3716,7 @@ select {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  background: #f7f5f2;
+  background: #f4f1f8;
 }
 
 .admin-sidebar {
@@ -4228,7 +4228,7 @@ select {
   overflow: hidden;
   place-items: center;
   padding: clamp(20px, 5vw, 56px);
-  background: radial-gradient(ellipse at 50% 15%, rgb(240 232 255 / 80%), transparent 48%), #f7f5f2;
+  background: radial-gradient(ellipse at 50% 15%, rgb(240 232 255 / 80%), transparent 48%), #f4f1f8;
 }
 
 .maintenance-orb {
@@ -4283,7 +4283,7 @@ select {
   margin: 20px 0 6px;
   overflow: hidden;
   border-radius: 22px;
-  background: linear-gradient(160deg, #f8f2ff 0%, #fff8e9 100%);
+  background: linear-gradient(160deg, #f8f4ff 0%, #eee7fc 100%);
 }
 
 .maintenance-sun {
@@ -4293,7 +4293,7 @@ select {
   width: 70px;
   aspect-ratio: 1;
   border-radius: 50%;
-  background: #ffcf6d;
+  background: #6d28d9;
   box-shadow: 0 0 0 12px rgb(255 207 109 / 20%);
 }
 
@@ -4369,8 +4369,8 @@ select {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #f0a321;
-  box-shadow: 0 0 0 4px #fff2d6;
+  background: #6d28d9;
+  box-shadow: 0 0 0 4px #eee7fc;
 }
 
 .maintenance-card h1 {
@@ -4405,7 +4405,7 @@ select {
 }
 
 .maintenance-time strong {
-  font-family: "Inter Tight", sans-serif;
+  font-family: "Outfit", sans-serif;
   font-size: clamp(23px, 5vw, 34px);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.06em;
