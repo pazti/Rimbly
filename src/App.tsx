@@ -157,7 +157,12 @@ function Button({
 function Logo({ onClick }: { onClick: () => void }) {
   return (
     <button className="logo" onClick={onClick} aria-label="Rimbly home">
-      <span className="logo-mark">R</span>
+      <span className="logo-mark" aria-hidden="true">
+        <img
+          src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/colour%20icon%20preview-U3JEroXylKhRU0xn7PCPxbARnG2r4D.png"
+          alt=""
+        />
+      </span>
       <span>Rimbly</span>
     </button>
   );
@@ -517,7 +522,12 @@ function MaintenancePage({
       <div className="maintenance-orb maintenance-orb-two" aria-hidden="true" />
       <section className="maintenance-card" aria-labelledby="maintenance-title">
         <div className="logo maintenance-logo" aria-label="Rimbly">
-          <span className="logo-mark">R</span>
+          <span className="logo-mark" aria-hidden="true">
+            <img
+              src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/colour%20icon%20preview-U3JEroXylKhRU0xn7PCPxbARnG2r4D.png"
+              alt=""
+            />
+          </span>
           <span>Rimbly</span>
         </div>
         <div className="maintenance-art" aria-hidden="true">

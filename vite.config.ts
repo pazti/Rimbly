@@ -36,9 +36,12 @@ react(),
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
       port: parseInt(process.env.PORT || '8443'),
       strictPort: true,
-      allowedHosts: process.env.CODESPACE_NAME
-        ? [`${process.env.CODESPACE_NAME}-${process.env.PORT || '8443'}.app.github.dev`]
-        : [],
+      allowedHosts: [
+        'sb-76yssya9pdjy.vercel.run',
+        ...(process.env.CODESPACE_NAME
+          ? [`${process.env.CODESPACE_NAME}-${process.env.PORT || '8443'}.app.github.dev`]
+          : []),
+      ],
       watch: {
         ignored: [
           '**/.figma/**',
