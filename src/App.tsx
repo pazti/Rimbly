@@ -1,32 +1,40 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   AppNotification,
   AdminAccess,
   AdminAuditLog,
   AdminContribution,
+  AdminQuizPaper,
+  AdminQuizSet,
   AdminPaper,
   AdminOverview,
   AdminStudent,
   AdminTeamMember,
   MaintenanceStatus,
   Contribution,
+  Battle,
   Course,
   Leader,
   Paper,
   Profile,
   PublicQuestion,
+  QuizQuestionReviewStatus,
   QuizAttempt,
+  QuizSet,
   University,
   createContribution,
   createSuggestion,
   getContributions,
   getCourses,
+  getAdminQuizDraft,
   getAdminAccess,
   getAdminAuditLogs,
   getAdminContributions,
   getAdminContributionUrl,
   getAdminPapers,
+  getAdminQuizPapers,
+  getAdminQuizSets,
   getAdminStudents,
   getAdminTeam,
   getAdminUniversities,
@@ -35,6 +43,9 @@ import {
   deleteAdminPaper,
   inviteAdmin,
   publishAdminPaper,
+  saveAdminQuizDraft,
+  requestAdminQuizReview,
+  reviewAdminQuiz,
   saveAdminUniversity,
   setMaintenanceStatus,
   setAdminStudentSuspension,
@@ -42,16 +53,25 @@ import {
   getLeaderboard,
   getNotifications,
   getPapers,
-  getPaperDownloadUrl,
+  getPaperReaderUrl,
+  extractAdminQuizQuestions,
   getProfile,
-  getQuestions,
+  getPublishedQuizSets,
+  getQuizSetQuestions,
+  submitQuizSet,
+  getBattleOpponents,
+  createBattle,
+  getBattles,
+  respondToBattle,
+  cancelBattle,
+  getBattleQuestions,
+  submitBattle,
   getUniversities,
   getQuizAttempts,
   getSavedCourseIds,
   markNotificationsRead,
   saveProfile,
   reviewAdminContribution,
-  submitQuiz,
   toggleSavedCourse,
 } from "./lib/data";
 import { supabase, supabaseConfigurationError } from "./lib/supabase";
@@ -78,6 +98,12 @@ type Route =
   | "suggest"
   | "notifications"
   | "admin";
+
+type PaperQuizAvailability = {
+  paperId: string;
+  status: "loading" | "ready" | "missing" | "error";
+  quizId: string | null;
+};
 
 const routes: Route[] = [
   "welcome",
@@ -650,6 +676,13 @@ function App() {
   const [questions, setQuestions] = useState<PublicQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [lastAttempt, setLastAttempt] = useState<QuizAttempt | null>(null);
+  const [paperQuizAvailability, setPaperQuizAvailability] = useState<PaperQuizAvailability | null>(
+    null,
+  );
+  const [publishedQuizSets, setPublishedQuizSets] = useState<QuizSet[]>([]);
+  const [activeQuizSetId, setActiveQuizSetId] = useState<string | null>(null);
+  const [sourceToRead, setSourceToRead] = useState<{ path: string; title: string } | null>(null);
+  const [leaderboardScope, setLeaderboardScope] = useState<"university" | "all">("university");
 
   const user = session?.user ?? null;
   const selectedCourse = courses.find((course) => course.id === selectedCourseId) ?? null;
@@ -820,6 +853,75 @@ function App() {
       active = false;
     };
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || !["quiz-setup", "paper"].includes(route)) return;
+    let active = true;
+    void getPublishedQuizSets()
+      .then((result) => {
+        if (active) setPublishedQuizSets(result);
+      })
+      .catch((loadError: unknown) => {
+        if (active)
+          setError(
+            loadError instanceof Error ? loadError.message : "Could not load published quizzes.",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [route, user?.id]);
+
+  useEffect(() => {
+    if (!user || !profile || route !== "leaderboard") return;
+    let active = true;
+    void getLeaderboard(leaderboardScope === "university" ? profile.university : null)
+      .then((result) => {
+        if (active) setLeaders(result);
+      })
+      .catch((loadError: unknown) => {
+        if (active)
+          setError(loadError instanceof Error ? loadError.message : "Could not load rankings.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [leaderboardScope, profile?.university, route, user?.id]);
+
+  useEffect(() => {
+    if (route !== "paper" || !selectedPaper) {
+      setPaperQuizAvailability(null);
+      return;
+    }
+
+    let active = true;
+    setPaperQuizAvailability({ paperId: selectedPaper.id, status: "loading", quizId: null });
+    void getPublishedQuizSets()
+      .then((quizSets) => {
+        if (active) {
+          setPublishedQuizSets(quizSets);
+          const linkedQuiz = quizSets.find((quiz) => quiz.paper_id === selectedPaper.id);
+          setPaperQuizAvailability({
+            paperId: selectedPaper.id,
+            status: linkedQuiz ? "ready" : "missing",
+            quizId: linkedQuiz?.id ?? null,
+          });
+        }
+      })
+      .catch((availabilityError: unknown) => {
+        if (!active) return;
+        setPaperQuizAvailability({ paperId: selectedPaper.id, status: "error", quizId: null });
+        setError(
+          availabilityError instanceof Error
+            ? availabilityError.message
+            : "Could not check for a quiz on this paper.",
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [route, selectedPaper?.id]);
 
   useEffect(() => {
     let active = true;
@@ -1032,19 +1134,30 @@ function App() {
     }
   };
 
-  const handleStartQuiz = async () => {
-    if (!selectedPaper) return;
+  const handleStartQuiz = async (quizId?: string) => {
+    if (!quizId) {
+      setError("Choose a quiz with approved structured questions.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const nextQuestions = await getQuestions(selectedPaper.id);
+      const nextQuestions = await getQuizSetQuestions(quizId);
       if (!nextQuestions.length) {
-        setError("This paper has no published quiz questions yet.");
+        setError("This quiz has no approved questions yet.");
         return;
       }
+      const quizSet = publishedQuizSets.find((item) => item.id === quizId);
+      const quizPaper = quizSet?.paper_id
+        ? papers.find((paper) => paper.id === quizSet.paper_id)
+        : null;
+      setSelectedPaperId(quizPaper?.id ?? null);
+      setSelectedCourseId(quizPaper?.course_id ?? null);
+      setActiveQuizSetId(quizId);
       setQuestions(nextQuestions);
       setAnswers({});
       setLastAttempt(null);
+      setQuizStartedAt(Date.now());
       navigate("quiz");
     } catch (questionError) {
       setError(
@@ -1056,16 +1169,16 @@ function App() {
   };
 
   const handleSubmitQuiz = async () => {
-    if (!selectedPaper || !user) return;
+    if (!activeQuizSetId || !user) return;
     setBusy(true);
     setError(null);
     try {
-      const attempt = await submitQuiz(
-        selectedPaper.id,
-        answers,
-        Math.max(0, Math.floor((Date.now() - quizStartedAt) / 1000)),
-      );
-      setLastAttempt(attempt);
+      const duration = Math.max(0, Math.floor((Date.now() - quizStartedAt) / 1000));
+      const attempt = await submitQuizSet(activeQuizSetId, answers, duration);
+      setLastAttempt({
+        ...attempt,
+        points_earned: attempt.points_earned ?? attempt.correct_count * 10,
+      });
       navigate("results");
       try {
         await refreshActivity();
@@ -1082,9 +1195,8 @@ function App() {
   };
 
   const [quizStartedAt, setQuizStartedAt] = useState(Date.now());
-  const startQuiz = async () => {
-    setQuizStartedAt(Date.now());
-    await handleStartQuiz();
+  const startQuiz = async (quizId?: string) => {
+    await handleStartQuiz(quizId);
   };
 
   const handleContribution = async (event: FormEvent<HTMLFormElement>) => {
@@ -1612,6 +1724,7 @@ function App() {
           courses={courses}
           papers={papers}
           coursesForUser={visibleCourses}
+          onQuiz={() => navigate("quiz-setup")}
           onSelect={(course) => {
             setSelectedCourseId(course.id);
             navigate("course");
@@ -1688,19 +1801,21 @@ function App() {
           <PaperPage
             paper={selectedPaper}
             course={selectedCourse}
-            onQuiz={() => navigate("quiz-setup")}
-            onDownload={async () => {
-              try {
-                const url = await getPaperDownloadUrl(selectedPaper.file_path);
-                window.location.assign(url);
-              } catch (downloadError) {
-                setError(
-                  downloadError instanceof Error
-                    ? downloadError.message
-                    : "Could not open this paper.",
-                );
-              }
-            }}
+            quizStatus={
+              paperQuizAvailability?.paperId === selectedPaper.id
+                ? paperQuizAvailability.status
+                : "loading"
+            }
+            quizBusy={busy}
+            watermark={user.email ?? profile?.full_name ?? "Rimbly user"}
+            onQuiz={() =>
+              void startQuiz(
+                paperQuizAvailability?.paperId === selectedPaper.id
+                  ? (paperQuizAvailability.quizId ?? undefined)
+                  : undefined,
+              )
+            }
+            onBattle={() => navigate("battle")}
           />
         ) : (
           <EmptyState
@@ -1712,55 +1827,57 @@ function App() {
         );
       break;
     case "quiz-setup":
-      title = "Quiz setup";
-      content = selectedCourse ? (
+      title = "Take a quiz";
+      content = (
         <>
           <div className="page-head compact">
-            <span className="eyebrow">Quiz mode</span>
-            <h1>Choose a paper.</h1>
-            <p>Questions and scoring come from published course content.</p>
+            <span className="eyebrow">Published quizzes</span>
+            <h1>Choose your challenge.</h1>
+            <p>
+              Questions may be entered manually or suggested by AI; a moderator approves each
+              question before it goes live.
+            </p>
           </div>
-          {matchingPapers.length ? (
+          {publishedQuizSets.length ? (
             <div className="course-list">
-              {matchingPapers.map((paper) => (
-                <button
-                  key={paper.id}
-                  className={`paper-row ${selectedPaperId === paper.id ? "selected" : ""}`}
-                  onClick={() => setSelectedPaperId(paper.id)}
-                >
-                  <span className="file-tile">▤</span>
-                  <span>
-                    <b>{paper.academic_session}</b>
+              {publishedQuizSets.map((quiz) => (
+                <article className="quiz-catalog-card" key={quiz.id}>
+                  <div>
+                    <h2>{quiz.title}</h2>
+                    <p>{quiz.description || "Reviewed practice questions"}</p>
                     <small>
-                      {paper.semester ?? "Paper"} ·{" "}
-                      {paper.page_count ? `${paper.page_count} pages` : "Page count unavailable"}
+                      {quiz.course_code
+                        ? `${quiz.course_code} · ${quiz.university} · ${quiz.question_count} questions`
+                        : `Source-linked quiz · ${quiz.question_count} questions`}
                     </small>
-                  </span>
-                  <span>{selectedPaperId === paper.id ? "✓" : "›"}</span>
-                </button>
+                    <button
+                      type="button"
+                      className="quiz-source-link"
+                      onClick={() =>
+                        setSourceToRead({
+                          path: quiz.source_file_path,
+                          title: `Original source: ${quiz.title}`,
+                        })
+                      }
+                    >
+                      Read source in viewer: {quiz.source_file_name}
+                    </button>
+                  </div>
+                  <Button disabled={busy} onClick={() => void startQuiz(quiz.id)}>
+                    {busy ? "Loading…" : "Take quiz"}
+                  </Button>
+                </article>
               ))}
             </div>
           ) : (
             <EmptyState
-              title="No quiz papers available"
-              text="Only approved papers can be used to create a quiz."
-              action="Contribute a paper"
-              onAction={() => navigate("contribute")}
+              title="No published quizzes yet"
+              text="Admins are adding source-linked questions and reviewing each one. You can still read past papers in the library."
+              action="Browse past questions"
+              onAction={() => navigate("practice")}
             />
           )}
-          {selectedPaper && matchingPapers.some((paper) => paper.id === selectedPaper.id) && (
-            <Button disabled={busy} onClick={() => void startQuiz()}>
-              {busy ? "Loading questions…" : "Load questions and start"}
-            </Button>
-          )}
         </>
-      ) : (
-        <EmptyState
-          title="Select a course first"
-          text="Choose a course in the library before setting up a quiz."
-          action="Browse courses"
-          onAction={() => navigate("practice")}
-        />
       );
       break;
     case "quiz":
@@ -1833,19 +1950,11 @@ function App() {
     case "battle":
       title = "Battle";
       content = (
-        <>
-          <div className="page-head">
-            <span className="eyebrow">Battle arena</span>
-            <h1>Challenge mode.</h1>
-            <p>
-              Live matchmaking is not enabled yet. No sample opponents or battle results are shown.
-            </p>
-          </div>
-          <EmptyState
-            title="No active battles"
-            text="When battle matchmaking is available, your active and completed matches will appear here."
-          />
-        </>
+        <BattlePage
+          userId={user.id}
+          university={profile.university}
+          onActivityRefresh={() => void refreshActivity()}
+        />
       );
       break;
     case "leaderboard":
@@ -1856,8 +1965,23 @@ function App() {
             <span className="eyebrow">Community rankings</span>
             <h1>Climb the board.</h1>
             <p>
-              Rankings are based on saved quiz attempts. New accounts appear after their first quiz.
+              Earn 10 points per correct answer and 4 for a battle win (1 for a draw or loss). Win
+              streaks unlock status titles.
             </p>
+          </div>
+          <div className="segment" aria-label="Leaderboard scope">
+            <button
+              className={leaderboardScope === "university" ? "active" : ""}
+              onClick={() => setLeaderboardScope("university")}
+            >
+              My university
+            </button>
+            <button
+              className={leaderboardScope === "all" ? "active" : ""}
+              onClick={() => setLeaderboardScope("all")}
+            >
+              All universities
+            </button>
           </div>
           {leaders.length ? (
             <div className="ranking-list">
@@ -1873,9 +1997,9 @@ function App() {
           ) : (
             <EmptyState
               title="No rankings yet"
-              text="Complete a quiz to earn points. Leaderboard entries are calculated from saved results."
-              action="Browse papers"
-              onAction={() => navigate("practice")}
+              text="Take a reviewed quiz or win a battle to earn points and appear on the board."
+              action="Find a quiz"
+              onAction={() => navigate("quiz-setup")}
             />
           )}
         </>
@@ -2156,6 +2280,14 @@ function App() {
       >
         {content}
       </AppShell>
+      {sourceToRead && (
+        <SourceDocumentDialog
+          path={sourceToRead.path}
+          title={sourceToRead.title}
+          watermark={user.email ?? profile?.full_name ?? "Rimbly user"}
+          onClose={() => setSourceToRead(null)}
+        />
+      )}
     </>
   );
 }
@@ -2181,6 +2313,7 @@ function AdminWorkspace({
     | "overview"
     | "contributions"
     | "papers"
+    | "quizzes"
     | "students"
     | "team"
     | "academics"
@@ -2191,6 +2324,8 @@ function AdminWorkspace({
   const [contributions, setContributions] = useState<AdminContribution[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [papers, setPapers] = useState<AdminPaper[]>([]);
+  const [quizPapers, setQuizPapers] = useState<AdminQuizPaper[]>([]);
+  const [adminQuizzes, setAdminQuizzes] = useState<AdminQuizSet[]>([]);
   const [students, setStudents] = useState<AdminStudent[]>([]);
   const [team, setTeam] = useState<AdminTeamMember[]>([]);
   const [adminUniversities, setAdminUniversities] = useState<
@@ -2221,6 +2356,11 @@ function AdminWorkspace({
   const canViewAudit = Boolean(access?.permissions.includes("audit.view"));
   const canViewDashboard = Boolean(access?.permissions.includes("dashboard.access"));
   const canManagePapers = Boolean(access?.permissions.includes("papers.manage"));
+  const canManageQuizzes = Boolean(
+    access?.permissions.includes("quiz.manage") || access?.permissions.includes("quiz.review"),
+  );
+  const canCreateQuizzes = Boolean(access?.permissions.includes("quiz.manage"));
+  const canReviewQuizzes = Boolean(access?.permissions.includes("quiz.review"));
   const canManageStudents = Boolean(access?.permissions.includes("students.manage"));
   const canManageTeam = Boolean(access?.permissions.includes("team.manage"));
   const canManageAcademics = Boolean(access?.permissions.includes("academics.manage"));
@@ -2315,6 +2455,24 @@ function AdminWorkspace({
       active = false;
     };
   }, [access, canManagePapers, section]);
+
+  useEffect(() => {
+    if (!access || section !== "quizzes" || !canManageQuizzes) return;
+    let active = true;
+    void Promise.all([getAdminQuizSets(), getAdminQuizPapers()])
+      .then(([nextQuizzes, nextPapers]) => {
+        if (!active) return;
+        setAdminQuizzes(nextQuizzes);
+        setQuizPapers(nextPapers);
+      })
+      .catch((loadError: unknown) => {
+        if (active)
+          setError(loadError instanceof Error ? loadError.message : "Could not load quiz content.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [access, canManageQuizzes, section]);
 
   useEffect(() => {
     if (!access || section !== "team" || !canManageTeam) return;
@@ -2519,6 +2677,10 @@ function AdminWorkspace({
     }
   };
 
+  const refreshAdminQuizzes = async () => {
+    setAdminQuizzes(await getAdminQuizSets());
+  };
+
   const handleCreateUniversity = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -2577,6 +2739,7 @@ function AdminWorkspace({
     { key: "overview", label: "Overview", visible: canViewDashboard },
     { key: "contributions", label: "Review queue", visible: canReview },
     { key: "papers", label: "Past questions", visible: canManagePapers },
+    { key: "quizzes", label: "Quiz authoring", visible: canManageQuizzes },
     { key: "students", label: "Students", visible: canManageStudents },
     { key: "team", label: "Team", visible: canManageTeam },
     { key: "academics", label: "Academics", visible: canManageAcademics },
@@ -2886,6 +3049,16 @@ function AdminWorkspace({
                   />
                 )}
               </section>
+            )}
+            {section === "quizzes" && (
+              <AdminQuizWorkspace
+                quizzes={adminQuizzes}
+                papers={quizPapers}
+                userId={userId}
+                canManage={canCreateQuizzes}
+                canReview={canReviewQuizzes}
+                onRefresh={refreshAdminQuizzes}
+              />
             )}
             {section === "students" && (
               <section className="admin-review-list">
@@ -3310,16 +3483,653 @@ function Stat({ icon, value, label }: { icon: string; value: string; label: stri
   );
 }
 
+function AdminQuizWorkspace({
+  quizzes,
+  papers,
+  userId,
+  canManage,
+  canReview,
+  onRefresh,
+}: {
+  quizzes: AdminQuizSet[];
+  papers: AdminQuizPaper[];
+  userId: string;
+  canManage: boolean;
+  canReview: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  type DraftQuestion = {
+    prompt: string;
+    options: string[];
+    correct_index: number | null;
+    explanation: string;
+    review_status: QuizQuestionReviewStatus;
+    source_page: string;
+    source_note: string;
+  };
+  const emptyQuestion = (): DraftQuestion => ({
+    prompt: "",
+    options: ["", "", "", ""],
+    correct_index: 0,
+    explanation: "",
+    review_status: "pending",
+    source_page: "",
+    source_note: "",
+  });
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [paperId, setPaperId] = useState("");
+  const [questions, setQuestions] = useState<DraftQuestion[]>([emptyQuestion()]);
+  const [savedQuizId, setSavedQuizId] = useState<string | null>(null);
+  const [reviewingQuiz, setReviewingQuiz] = useState(false);
+  const [reviewChangesSaved, setReviewChangesSaved] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractionProgress, setExtractionProgress] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [sourceToView, setSourceToView] = useState<{ path: string; title: string } | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const selectedPaper = papers.find((paper) => paper.id === paperId) ?? null;
+
+  const saveDraft = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const savedId = await saveAdminQuizDraft({
+        id: savedQuizId,
+        title: String(values.get("title") ?? ""),
+        description: String(values.get("description") ?? ""),
+        paperId: paperId || null,
+        questions: questions.map((question) => ({
+          prompt: question.prompt,
+          options: question.options,
+          correct_index: question.correct_index,
+          explanation: question.explanation,
+          review_status: question.review_status,
+          source_page: question.source_page ? Number(question.source_page) : null,
+          source_note: question.source_note,
+        })),
+      });
+      setSavedQuizId(savedId);
+      if (reviewingQuiz) setReviewChangesSaved(true);
+      await onRefresh();
+      setNotice(
+        reviewingQuiz
+          ? "Review edits saved. Only questions marked approved can be published."
+          : "Draft saved. It will not be visible to students until a different reviewer approves it.",
+      );
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save this quiz draft.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const requestReview = async (quizId: string) => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await requestAdminQuizReview(quizId);
+      await onRefresh();
+      if (quizId === savedQuizId) {
+        setSavedQuizId(null);
+        setTitle("");
+        setDescription("");
+        setPaperId("");
+        setReviewingQuiz(false);
+        setReviewChangesSaved(false);
+        setQuestions([emptyQuestion()]);
+        formRef.current?.reset();
+      }
+      setNotice(
+        "Submitted for human review. The quiz remains unpublished until a different reviewer approves it.",
+      );
+    } catch (reviewError) {
+      setError(
+        reviewError instanceof Error ? reviewError.message : "Could not request quiz review.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const review = async (quizId: string, decision: "publish" | "needs_revision") => {
+    if (decision === "publish" && !reviewChangesSaved) {
+      setError("Save your per-question review decisions before publishing.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await reviewAdminQuiz(quizId, decision);
+      await onRefresh();
+      if (quizId === savedQuizId) {
+        setSavedQuizId(null);
+        setReviewingQuiz(false);
+        setReviewChangesSaved(false);
+        setQuestions([emptyQuestion()]);
+        formRef.current?.reset();
+      }
+      setNotice(
+        decision === "publish"
+          ? "Approved questions are now available for practice and battles."
+          : "Returned to the quiz creator for revision.",
+      );
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Could not review this quiz.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editDraft = async (quizId: string, forReview = false) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const draft = await getAdminQuizDraft(quizId);
+      setSavedQuizId(draft.id);
+      setReviewingQuiz(forReview);
+      setReviewChangesSaved(!forReview);
+      setTitle(draft.title);
+      setDescription(draft.description);
+      setPaperId(draft.paper_id ?? "");
+      setQuestions(
+        draft.questions.map((question) => ({
+          ...question,
+          correct_index: question.correct_index,
+          explanation: question.explanation,
+          review_status: question.review_status,
+          source_page: question.source_page ? String(question.source_page) : "",
+        })),
+      );
+      setNotice(
+        forReview
+          ? "Review the original paper and each question. Save your decisions before publishing."
+          : "Draft loaded for editing.",
+      );
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load this quiz draft.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateQuestion = (index: number, patch: Partial<DraftQuestion>) => {
+    if (reviewingQuiz) setReviewChangesSaved(false);
+    setQuestions((current) =>
+      current.map((question, questionIndex) =>
+        questionIndex === index ? { ...question, ...patch } : question,
+      ),
+    );
+  };
+
+  const extractQuestions = async () => {
+    if (!paperId || !selectedPaper) return;
+    setExtracting(true);
+    setExtractionProgress("Preparing the source paper…");
+    setError(null);
+    setNotice(null);
+    try {
+      const { questions: extracted, warning } = await extractAdminQuizQuestions(
+        paperId,
+        selectedPaper.file_path,
+        setExtractionProgress,
+      );
+      if (!extracted.length) {
+        if (warning) setError(warning);
+        else
+          setNotice("No clear questions were found. Add questions manually or try another source.");
+        return;
+      }
+      if (questions.length + extracted.length > 100) {
+        throw new Error(
+          "Extraction would exceed the 100-question limit. Remove questions and retry.",
+        );
+      }
+      setQuestions((current) => [
+        ...current,
+        ...extracted.map((question) => ({
+          ...question,
+          review_status: "pending" as const,
+          source_page: question.source_page ? String(question.source_page) : "",
+        })),
+      ]);
+      if (warning) {
+        setError(warning);
+        setNotice(`${extracted.length} suggestions added as pending questions.`);
+      } else {
+        setNotice(
+          `${extracted.length} suggestions added as pending questions. Verify every prompt, option, answer, and explanation against the original paper.`,
+        );
+      }
+    } catch (extractError) {
+      setError(
+        extractError instanceof Error ? extractError.message : "Could not extract questions.",
+      );
+    } finally {
+      setExtracting(false);
+      setExtractionProgress(null);
+    }
+  };
+
+  return (
+    <>
+      <section className="admin-review-list">
+        <div className="admin-section-heading">
+          <div>
+            <span className="eyebrow">
+              {reviewingQuiz
+                ? "Human question review"
+                : canManage
+                  ? "Quiz authoring"
+                  : "Review queue"}
+            </span>
+            <h2>
+              {reviewingQuiz
+                ? "Review questions against the original"
+                : canManage
+                  ? "Create a question set"
+                  : "Pending question sets"}
+            </h2>
+          </div>
+          <span>{quizzes.length} quizzes</span>
+        </div>
+        {(canManage || (canReview && reviewingQuiz)) && (
+          <p className="admin-quiz-guidance">
+            The original paper is retained as the source of truth. AI extraction only creates
+            suggestions; every structured question stays pending until a moderator checks and
+            approves it.
+          </p>
+        )}
+        {error && (
+          <p className="app-feedback" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p className="app-notice" role="status">
+            {notice}
+          </p>
+        )}
+        {(canManage || (canReview && reviewingQuiz)) && (
+          <form ref={formRef} className="admin-form" onSubmit={(event) => void saveDraft(event)}>
+            <label>
+              <span>Quiz title</span>
+              <input
+                name="title"
+                required
+                maxLength={160}
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="e.g. CSC 101 · 2024/25 revision"
+              />
+            </label>
+            <label>
+              <span>Description (optional)</span>
+              <textarea
+                name="description"
+                maxLength={2000}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                rows={3}
+              />
+            </label>
+            <label>
+              <span>Source paper</span>
+              <select
+                required
+                value={paperId}
+                disabled={Boolean(savedQuizId)}
+                onChange={(event) => setPaperId(event.target.value)}
+              >
+                <option value="">Select an approved source paper</option>
+                {papers.map((paper) => (
+                  <option key={paper.id} value={paper.id}>
+                    {paper.university} · {paper.course_code} · {paper.academic_session}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedPaper && (
+              <div className="admin-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    setSourceToView({
+                      path: selectedPaper.file_path,
+                      title: `${selectedPaper.university} · ${selectedPaper.course_code} · ${selectedPaper.academic_session}`,
+                    })
+                  }
+                >
+                  View original paper
+                </Button>
+                {canManage && !reviewingQuiz && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={extracting}
+                      onClick={() => void extractQuestions()}
+                    >
+                      {extracting
+                        ? (extractionProgress ?? "Extracting suggestions…")
+                        : "Extract questions (AI assist)"}
+                    </Button>
+                    <small className="field-note">
+                      This sends rendered pages of the selected paper to Groq for extraction.
+                      Suggestions remain pending until reviewed.
+                    </small>
+                  </>
+                )}
+              </div>
+            )}
+            {questions.map((question, questionIndex) => (
+              <fieldset className="quiz-question-editor" key={questionIndex}>
+                <legend>
+                  Question {questionIndex + 1}
+                  {reviewingQuiz ? ` · ${question.review_status}` : ""}
+                </legend>
+                {questions.length > 1 && (
+                  <button
+                    type="button"
+                    className="quiz-remove-question"
+                    onClick={() => {
+                      if (reviewingQuiz) setReviewChangesSaved(false);
+                      setQuestions((current) =>
+                        current.filter((_, index) => index !== questionIndex),
+                      );
+                    }}
+                  >
+                    Remove question
+                  </button>
+                )}
+                <label>
+                  <span>Question text</span>
+                  <textarea
+                    required
+                    maxLength={2000}
+                    value={question.prompt}
+                    onChange={(event) =>
+                      updateQuestion(questionIndex, { prompt: event.target.value })
+                    }
+                    rows={3}
+                  />
+                </label>
+                <div className="quiz-answer-options">
+                  {question.options.map((option, optionIndex) => (
+                    <label key={optionIndex}>
+                      <span>Option {String.fromCharCode(65 + optionIndex)}</span>
+                      <span className="quiz-option-input">
+                        <input
+                          required
+                          maxLength={500}
+                          value={option}
+                          onChange={(event) =>
+                            updateQuestion(questionIndex, {
+                              options: question.options.map((value, index) =>
+                                index === optionIndex ? event.target.value : value,
+                              ),
+                            })
+                          }
+                        />
+                        {question.options.length > 2 && (
+                          <button
+                            type="button"
+                            aria-label={`Remove option ${String.fromCharCode(65 + optionIndex)}`}
+                            onClick={() =>
+                              updateQuestion(questionIndex, {
+                                options: question.options.filter(
+                                  (_, index) => index !== optionIndex,
+                                ),
+                                correct_index:
+                                  question.correct_index === null
+                                    ? null
+                                    : question.correct_index === optionIndex
+                                      ? 0
+                                      : question.correct_index > optionIndex
+                                        ? question.correct_index - 1
+                                        : question.correct_index,
+                              })
+                            }
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {question.options.length < 6 && (
+                  <button
+                    type="button"
+                    className="quiz-add-option"
+                    onClick={() =>
+                      updateQuestion(questionIndex, { options: [...question.options, ""] })
+                    }
+                  >
+                    Add answer option
+                  </button>
+                )}
+                <div className="form-two">
+                  <label>
+                    <span>Correct answer</span>
+                    <select
+                      required={reviewingQuiz && question.review_status === "approved"}
+                      value={question.correct_index ?? ""}
+                      onChange={(event) =>
+                        updateQuestion(questionIndex, {
+                          correct_index: event.target.value ? Number(event.target.value) : null,
+                        })
+                      }
+                    >
+                      <option value="">Select correct answer</option>
+                      {question.options.map((_, optionIndex) => (
+                        <option key={optionIndex} value={optionIndex}>
+                          Option {String.fromCharCode(65 + optionIndex)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Source page (optional)</span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={question.source_page}
+                      onChange={(event) =>
+                        updateQuestion(questionIndex, { source_page: event.target.value })
+                      }
+                    />
+                  </label>
+                </div>
+                <label>
+                  <span>Explanation (optional)</span>
+                  <textarea
+                    maxLength={2000}
+                    value={question.explanation}
+                    onChange={(event) =>
+                      updateQuestion(questionIndex, { explanation: event.target.value })
+                    }
+                    rows={2}
+                  />
+                </label>
+                <label>
+                  <span>Source note (optional)</span>
+                  <input
+                    value={question.source_note}
+                    maxLength={500}
+                    onChange={(event) =>
+                      updateQuestion(questionIndex, { source_note: event.target.value })
+                    }
+                    placeholder="Reference to the original paper or marking guide"
+                  />
+                </label>
+                {reviewingQuiz && (
+                  <label>
+                    <span>Question review decision</span>
+                    <select
+                      value={question.review_status}
+                      onChange={(event) =>
+                        updateQuestion(questionIndex, {
+                          review_status: event.target.value as QuizQuestionReviewStatus,
+                        })
+                      }
+                    >
+                      <option value="pending">Pending review</option>
+                      <option value="approved">Approve question</option>
+                      <option value="rejected">Reject question</option>
+                    </select>
+                  </label>
+                )}
+              </fieldset>
+            ))}
+            <div className="admin-actions">
+              <Button
+                variant="secondary"
+                disabled={saving || questions.length >= 100}
+                onClick={() => {
+                  if (reviewingQuiz) setReviewChangesSaved(false);
+                  setQuestions((current) => [...current, emptyQuestion()]);
+                }}
+              >
+                Add question
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving
+                  ? "Saving…"
+                  : reviewingQuiz
+                    ? "Save review decisions"
+                    : savedQuizId
+                      ? "Save draft changes"
+                      : "Save quiz draft"}
+              </Button>
+              {reviewingQuiz && savedQuizId && (
+                <>
+                  <Button
+                    type="button"
+                    disabled={saving || !reviewChangesSaved}
+                    onClick={() => void review(savedQuizId, "publish")}
+                  >
+                    Publish approved questions
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={saving}
+                    onClick={() => void review(savedQuizId, "needs_revision")}
+                  >
+                    Return set for edits
+                  </Button>
+                </>
+              )}
+            </div>
+          </form>
+        )}
+
+        <div className="admin-section-heading">
+          <div>
+            <span className="eyebrow">Review workflow</span>
+            <h2>Quiz question sets</h2>
+          </div>
+        </div>
+        {quizzes.length ? (
+          quizzes.map((quiz) => (
+            <article className="admin-contribution admin-quiz-row" key={quiz.id}>
+              <div>
+                <strong>{quiz.title}</strong>
+                <small>
+                  {quiz.paper_id
+                    ? (papers.find((paper) => paper.id === quiz.paper_id)?.course_code ??
+                      "Linked past paper")
+                    : "Standalone source"}{" "}
+                  · {quiz.question_count} questions · Created by {quiz.creator_name}
+                </small>
+              </div>
+              {quiz.paper_id && papers.some((paper) => paper.id === quiz.paper_id) && (
+                <Button
+                  variant="secondary"
+                  disabled={saving}
+                  onClick={() => {
+                    const sourcePaper = papers.find((paper) => paper.id === quiz.paper_id);
+                    if (sourcePaper) {
+                      setSourceToView({
+                        path: sourcePaper.file_path,
+                        title: `${sourcePaper.university} · ${sourcePaper.course_code} · ${sourcePaper.academic_session}`,
+                      });
+                    }
+                  }}
+                >
+                  View original
+                </Button>
+              )}
+              <span
+                className={`badge ${quiz.status === "published" ? "badge-green" : "badge-amber"}`}
+              >
+                {quiz.status.replace("_", " ")}
+              </span>
+              {canManage &&
+                quiz.created_by === userId &&
+                ["draft", "needs_revision"].includes(quiz.status) && (
+                  <>
+                    <Button
+                      variant="secondary"
+                      disabled={saving}
+                      onClick={() => void editDraft(quiz.id)}
+                    >
+                      Edit draft
+                    </Button>
+                    <Button disabled={saving} onClick={() => void requestReview(quiz.id)}>
+                      Request review
+                    </Button>
+                  </>
+                )}
+              {canReview && quiz.created_by !== userId && quiz.status === "pending_review" && (
+                <Button disabled={saving} onClick={() => void editDraft(quiz.id, true)}>
+                  Review questions
+                </Button>
+              )}
+            </article>
+          ))
+        ) : (
+          <EmptyState
+            title="No quiz sets yet"
+            text="Create a source-linked question set. It stays unpublished until another reviewer approves questions."
+          />
+        )}
+      </section>
+      {sourceToView && (
+        <SourceDocumentDialog
+          path={sourceToView.path}
+          title={sourceToView.title}
+          watermark="Rimbly moderator"
+          onClose={() => setSourceToView(null)}
+        />
+      )}
+    </>
+  );
+}
+
 function PracticePage({
   courses,
   papers,
   coursesForUser,
+  onQuiz,
   onSelect,
   onNavigate,
 }: {
   courses: Course[];
   papers: Paper[];
   coursesForUser: Course[];
+  onQuiz: () => void;
   onSelect: (course: Course) => void;
   onNavigate: (route: Route) => void;
 }) {
@@ -3336,6 +4146,7 @@ function PracticePage({
         <span className="eyebrow">Past questions library</span>
         <h1>Practice with published papers.</h1>
         <p>Browse courses and past papers from the study library.</p>
+        <Button onClick={onQuiz}>Take a published quiz</Button>
       </div>
       <div className="segment">
         <button
@@ -3396,6 +4207,380 @@ function PracticePage({
   );
 }
 
+function BattlePage({
+  userId,
+  university,
+  onActivityRefresh,
+}: {
+  userId: string;
+  university: string | null;
+  onActivityRefresh: () => void;
+}) {
+  const [quizzes, setQuizzes] = useState<QuizSet[]>([]);
+  const [opponents, setOpponents] = useState<Awaited<ReturnType<typeof getBattleOpponents>>>([]);
+  const [battles, setBattles] = useState<Battle[]>([]);
+  const [search, setSearch] = useState("");
+  const [quizId, setQuizId] = useState("");
+  const [activeBattleId, setActiveBattleId] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<PublicQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const refreshBattles = async () => {
+    setBattles(await getBattles());
+  };
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([getPublishedQuizSets(), getBattles()])
+      .then(([nextQuizzes, nextBattles]) => {
+        if (!active) return;
+        setQuizzes(nextQuizzes);
+        setBattles(nextBattles);
+      })
+      .catch((loadError: unknown) => {
+        if (active)
+          setError(
+            loadError instanceof Error ? loadError.message : "Could not load the battle arena.",
+          );
+      });
+    const interval = window.setInterval(() => {
+      void getBattles()
+        .then((result) => {
+          if (active) setBattles(result);
+        })
+        .catch((refreshError: unknown) => {
+          if (active)
+            setError(
+              refreshError instanceof Error ? refreshError.message : "Could not refresh battles.",
+            );
+        });
+    }, 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void getBattleOpponents(search)
+        .then((result) => {
+          if (active) setOpponents(result);
+        })
+        .catch((searchError: unknown) => {
+          if (active)
+            setError(
+              searchError instanceof Error ? searchError.message : "Could not find players.",
+            );
+        });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [search]);
+
+  const respond = async (battleId: string, accept: boolean) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await respondToBattle(battleId, accept);
+      await refreshBattles();
+      setNotice(
+        accept ? "Challenge accepted. You can start the shared quiz now." : "Challenge declined.",
+      );
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error ? actionError.message : "Could not respond to challenge.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const challenge = async (opponentId: string) => {
+    if (!quizId) {
+      setError("Choose a published quiz for your challenge.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await createBattle(quizId, opponentId);
+      await refreshBattles();
+      setNotice("Challenge sent. Your opponent will get the same questions when they accept.");
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error ? actionError.message : "Could not send this challenge.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startBattle = async (battleId: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const nextQuestions = await getBattleQuestions(battleId);
+      setQuestions(nextQuestions);
+      setAnswers({});
+      setActiveBattleId(battleId);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load battle questions.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitAnswers = async () => {
+    if (!activeBattleId) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await submitBattle(activeBattleId, answers);
+      setActiveBattleId(null);
+      setQuestions([]);
+      setNotice(
+        result.status === "waiting_for_opponent"
+          ? `Submitted ${result.correct_count}/${result.total_questions} correct. Waiting for your opponent.`
+          : result.is_draw
+            ? `Both players tied on correct answers and time. It’s a draw; you earned ${result.points_earned} ${result.points_earned === 1 ? "point" : "points"}.`
+            : result.winner_id === userId
+              ? `You won ${result.points_earned} points! Your current win streak is ${result.your_streak}.`
+              : `Battle complete. You earned ${result.points_earned} ${result.points_earned === 1 ? "point" : "points"}. Check the results below.`,
+      );
+      await refreshBattles();
+      onActivityRefresh();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : "Could not submit battle answers.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (activeBattleId && questions.length) {
+    return (
+      <section className="battle-workspace">
+        <div className="page-head compact">
+          <span className="eyebrow">One-on-one · same questions</span>
+          <h1>Battle in progress.</h1>
+          <p>More correct answers wins; equal scores are decided by faster time.</p>
+        </div>
+        {questions.map((question) => (
+          <article className="battle-question" key={question.id}>
+            <h2>
+              {question.position}. {question.prompt}
+            </h2>
+            <div className="answer-list">
+              {question.options.map((option, index) => (
+                <button
+                  type="button"
+                  key={`${question.id}-${index}`}
+                  className={answers[question.id] === index ? "selected" : ""}
+                  onClick={() => setAnswers((current) => ({ ...current, [question.id]: index }))}
+                >
+                  <i>{String.fromCharCode(65 + index)}</i>
+                  <span>{option}</span>
+                  <em>{answers[question.id] === index ? "✓" : ""}</em>
+                </button>
+              ))}
+            </div>
+          </article>
+        ))}
+        <div className="battle-submit">
+          <span>
+            {Object.keys(answers).length} of {questions.length} answered
+          </span>
+          <Button
+            disabled={busy || Object.keys(answers).length !== questions.length}
+            onClick={() => void submitAnswers()}
+          >
+            {busy ? "Submitting…" : "Submit battle"}
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <div className="battle-workspace">
+      <div className="page-head">
+        <span className="eyebrow">One-on-one battle arena</span>
+        <h1>Challenge a classmate.</h1>
+        <p>
+          Same reviewed quiz for both players. Correct answers decide the winner, then faster time.
+          Wins build streaks, points, and titles.
+        </p>
+      </div>
+      {error && (
+        <p className="app-feedback" role="alert">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p className="app-notice" role="status">
+          {notice}
+        </p>
+      )}
+      <section className="battle-challenge-panel">
+        <div>
+          <span className="eyebrow">Your university</span>
+          <h2>{university || "Complete your university profile to find players"}</h2>
+        </div>
+        <label>
+          <span>Shared quiz</span>
+          <select value={quizId} onChange={(event) => setQuizId(event.target.value)}>
+            <option value="">Choose a published quiz</option>
+            {quizzes.map((quiz) => (
+              <option key={quiz.id} value={quiz.id}>
+                {quiz.title} · {quiz.question_count} questions
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="search-field">
+          <span aria-hidden="true">⌕</span>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Find a player at your university"
+          />
+        </label>
+        {opponents.length ? (
+          <div className="battle-opponent-list">
+            {opponents.map((opponent) => (
+              <article key={opponent.user_id}>
+                <span className="avatar">
+                  {(opponent.full_name || "S").slice(0, 1).toUpperCase()}
+                </span>
+                <div>
+                  <strong>{opponent.full_name || "Student"}</strong>
+                  <small>{opponent.university}</small>
+                </div>
+                <Button disabled={busy || !quizId} onClick={() => void challenge(opponent.user_id)}>
+                  Challenge
+                </Button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="field-note">No active players found at your university.</p>
+        )}
+      </section>
+      <section className="battle-matches">
+        <div className="admin-section-heading">
+          <div>
+            <span className="eyebrow">Live and recent</span>
+            <h2>Your challenges</h2>
+          </div>
+          <Button variant="secondary" disabled={busy} onClick={() => void refreshBattles()}>
+            Refresh
+          </Button>
+        </div>
+        {battles.length ? (
+          battles.map((battle) => {
+            const incoming = battle.challenged_id === userId && battle.status === "pending";
+            const outgoing = battle.challenger_id === userId && battle.status === "pending";
+            const otherName =
+              battle.challenger_id === userId ? battle.challenged_name : battle.challenger_name;
+            return (
+              <article className="battle-match-row" key={battle.id}>
+                <div>
+                  <strong>{battle.quiz_title}</strong>
+                  <small>
+                    {incoming ? `${otherName} challenged you` : `Challenge with ${otherName}`}
+                    {" · "}
+                    {new Date(battle.created_at).toLocaleDateString()}
+                  </small>
+                </div>
+                <span
+                  className={`badge ${battle.status === "completed" ? "badge-purple" : "badge-amber"}`}
+                >
+                  {battle.status}
+                </span>
+                {incoming && (
+                  <>
+                    <Button disabled={busy} onClick={() => void respond(battle.id, true)}>
+                      Accept
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => void respond(battle.id, false)}
+                    >
+                      Decline
+                    </Button>
+                  </>
+                )}
+                {outgoing && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      setError(null);
+                      try {
+                        await cancelBattle(battle.id);
+                        await refreshBattles();
+                      } catch (cancelError) {
+                        setError(
+                          cancelError instanceof Error
+                            ? cancelError.message
+                            : "Could not cancel this challenge.",
+                        );
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+                {battle.status === "active" && !battle.your_submission && (
+                  <Button disabled={busy} onClick={() => void startBattle(battle.id)}>
+                    Play
+                  </Button>
+                )}
+                {battle.status === "active" && battle.your_submission && (
+                  <small>Submitted · waiting for your opponent</small>
+                )}
+                {battle.status === "completed" && (
+                  <div className="battle-match-result">
+                    <strong>
+                      {battle.is_draw ? "Draw" : battle.winner_id === userId ? "Victory" : "Defeat"}
+                    </strong>
+                    <small>
+                      You {battle.your_correct_count ?? 0} correct in{" "}
+                      {(battle.your_duration_seconds ?? 0).toFixed(2)}s{" · "}
+                      opponent {battle.opponent_correct_count ?? 0} correct in{" "}
+                      {(battle.opponent_duration_seconds ?? 0).toFixed(2)}s
+                    </small>
+                  </div>
+                )}
+              </article>
+            );
+          })
+        ) : (
+          <EmptyState
+            title="No challenges yet"
+            text="Choose a reviewed quiz and challenge an active student at your university."
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
 function PaperRow({ paper, onClick }: { paper: Paper; onClick: () => void }) {
   return (
     <button className="paper-row" onClick={onClick}>
@@ -3416,14 +4601,42 @@ function PaperRow({ paper, onClick }: { paper: Paper; onClick: () => void }) {
 function PaperPage({
   paper,
   course,
+  quizStatus,
+  quizBusy,
+  watermark,
   onQuiz,
-  onDownload,
+  onBattle,
 }: {
   paper: Paper;
   course: Course;
+  quizStatus: PaperQuizAvailability["status"];
+  quizBusy: boolean;
+  watermark: string;
   onQuiz: () => void;
-  onDownload: () => void;
+  onBattle: () => void;
 }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setPreviewUrl(null);
+    setPreviewError(null);
+    void getPaperReaderUrl(paper.file_path)
+      .then((url) => {
+        if (active) setPreviewUrl(url);
+      })
+      .catch((loadError: unknown) => {
+        if (active)
+          setPreviewError(
+            loadError instanceof Error ? loadError.message : "Could not read the original paper.",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [paper.id, paper.file_path]);
+
   return (
     <>
       <div className="paper-meta-head">
@@ -3464,17 +4677,147 @@ function PaperPage({
           </div>
         </dl>
       </section>
+      <section className="past-paper-reader" aria-label="Original past paper">
+        <div>
+          <span className="eyebrow">Original source</span>
+          <h2>Read the past paper</h2>
+          <p>Unchanged source document. Quiz questions are entered and reviewed separately.</p>
+        </div>
+        {previewUrl ? (
+          <ProtectedDocumentSurface
+            src={previewUrl}
+            title={`Original ${course.code} past paper`}
+            isPdf={/\.pdf(?:$|[?#])/i.test(paper.file_path)}
+            watermark={watermark}
+          />
+        ) : (
+          <p
+            className={previewError ? "reader-error" : "reader-loading"}
+            role={previewError ? "alert" : "status"}
+          >
+            {previewError || "Loading the source document…"}
+          </p>
+        )}
+      </section>
       <div className="paper-cta">
         <div>
-          <h3>Practise from this paper</h3>
-          <p>Quiz questions are fetched from the published question set.</p>
+          <h3>Ready to practise?</h3>
+          <p>Put your knowledge to work with a reviewed quiz or challenge a classmate in Battle.</p>
         </div>
-        <Button onClick={onQuiz}>Set up quiz</Button>
-        <Button variant="secondary" onClick={onDownload}>
-          Download paper
+        <Button
+          disabled={
+            quizBusy ||
+            quizStatus === "loading" ||
+            quizStatus === "missing" ||
+            quizStatus === "error"
+          }
+          onClick={onQuiz}
+        >
+          {quizBusy || quizStatus === "loading"
+            ? "Checking quiz…"
+            : quizStatus === "ready"
+              ? "Take quiz"
+              : quizStatus === "missing"
+                ? "No quiz available"
+                : quizStatus === "error"
+                  ? "Quiz check failed"
+                  : "Retry quiz check"}
+        </Button>
+        <Button variant="secondary" onClick={onBattle}>
+          Challenge in Battle
         </Button>
       </div>
     </>
+  );
+}
+
+function SourceDocumentDialog({
+  path,
+  title,
+  watermark,
+  onClose,
+}: {
+  path: string;
+  title: string;
+  watermark: string;
+  onClose: () => void;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setSrc(null);
+    setError(null);
+    void getPaperReaderUrl(path)
+      .then((url) => {
+        if (active) setSrc(url);
+      })
+      .catch((loadError: unknown) => {
+        if (active)
+          setError(
+            loadError instanceof Error ? loadError.message : "Could not open the original source.",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [path]);
+
+  return (
+    <div className="source-dialog-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="source-document-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <strong>{title}</strong>
+          <button type="button" onClick={onClose} aria-label="Close source viewer">
+            ×
+          </button>
+        </header>
+        {src ? (
+          <ProtectedDocumentSurface
+            src={src}
+            title={title}
+            isPdf={/\.pdf(?:$|[?#])/i.test(path)}
+            watermark={watermark}
+          />
+        ) : (
+          <p
+            className={error ? "reader-error" : "reader-loading"}
+            role={error ? "alert" : "status"}
+          >
+            {error || "Loading the source document…"}
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ProtectedDocumentSurface({
+  src,
+  title,
+  isPdf,
+  watermark,
+}: {
+  src: string;
+  title: string;
+  isPdf: boolean;
+  watermark: string;
+}) {
+  return (
+    <div className="protected-document">
+      {isPdf ? <iframe src={src} title={title} /> : <img src={src} alt={title} />}
+      <div className="document-watermark" aria-hidden="true">
+        {Array.from({ length: 9 }, (_, index) => (
+          <span key={index}>{watermark} · RIMBLY</span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -3572,15 +4915,22 @@ function ResultsPage({
         <h1>{attempt.score_percent}%</h1>
         <p>
           {attempt.correct_count} correct out of {attempt.total_questions}
-          {paper ? ` · ${paper.academic_session}` : ""}
+          {attempt.quiz_title
+            ? ` · ${attempt.quiz_title}`
+            : paper
+              ? ` · ${paper.academic_session}`
+              : ""}
         </p>
         <div className="xp-pill">
           {Math.round(attempt.duration_seconds / 60)} min · recorded{" "}
           {new Date(attempt.created_at).toLocaleString()}
         </div>
+        {attempt.points_earned !== undefined && (
+          <div className="xp-pill">{attempt.points_earned} points earned</div>
+        )}
       </div>
       <div className="result-actions">
-        <Button onClick={onRetry}>Try another paper</Button>
+        <Button onClick={onRetry}>Try another quiz</Button>
         <Button variant="secondary" onClick={onHistory}>
           View quiz history
         </Button>
@@ -3598,7 +4948,7 @@ function AttemptRow({ attempt, paper }: { attempt: QuizAttempt; paper?: Paper })
         {attempt.score_percent}%
       </span>
       <span>
-        <b>{paper?.academic_session ?? "Past paper"}</b>
+        <b>{attempt.quiz_title ?? paper?.academic_session ?? "Past paper"}</b>
         <small>
           {attempt.correct_count}/{attempt.total_questions} correct ·{" "}
           {Math.ceil(attempt.duration_seconds / 60)} min
@@ -3624,7 +4974,9 @@ function LeaderRow({ leader, rank, isMe }: { leader: Leader; rank: number; isMe:
       <span>
         <strong>{leader.full_name || "Student"}</strong>
         <small>
-          {leader.university ?? "University not set"} · {leader.quizzes_completed} quizzes
+          {leader.university ?? "University not set"} · {leader.title || "Rookie"} ·{" "}
+          {leader.quizzes_completed} quizzes
+          {leader.current_win_streak ? ` · ${leader.current_win_streak} win streak` : ""}
         </small>
       </span>
       <b>{leader.points.toLocaleString()} pts</b>
