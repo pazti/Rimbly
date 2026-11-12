@@ -129,10 +129,15 @@ const routes: Route[] = [
   "admin",
 ];
 
-const routeFromHash = (): Route => {
-  const hash = window.location.hash.replace(/^#\/?/, "");
-  return routes.includes(hash as Route) ? (hash as Route) : "welcome";
+const routeFromLocation = (): Route => {
+  const queryRoute = new URLSearchParams(window.location.search).get("route");
+  if (routes.includes(queryRoute as Route)) return queryRoute as Route;
+
+  const hashRoute = window.location.hash.replace(/^#\/?/, "");
+  return routes.includes(hashRoute as Route) ? (hashRoute as Route) : "welcome";
 };
+
+const routeUrl = (route: Route) => `${window.location.origin}/?route=${encodeURIComponent(route)}`;
 
 const parseAdminRole = (value: string): AdminAccess["role"] | null =>
   value === "super_admin" || value === "admin" || value === "moderator" ? value : null;
@@ -646,7 +651,7 @@ function CourseCard({
 }
 
 function App() {
-  const [route, setRoute] = useState<Route>(routeFromHash);
+  const [route, setRoute] = useState<Route>(routeFromLocation);
   const [verificationEmail, setVerificationEmail] = useState(
     () => window.sessionStorage.getItem("rimbly-verification-email") ?? "",
   );
@@ -700,16 +705,17 @@ function App() {
   const navigate = (next: Route) => {
     setError(null);
     setNotice(null);
-    window.location.hash = `#/${next}`;
+    window.history.pushState({ route: next }, "", routeUrl(next));
+    setRoute(next);
   };
 
   useEffect(() => {
-    const updateRoute = () => setRoute(routeFromHash());
-    window.addEventListener("hashchange", updateRoute);
+    const updateRoute = () => setRoute(routeFromLocation());
+    window.addEventListener("popstate", updateRoute);
 
     if (!supabase) {
       setAuthReady(true);
-      return () => window.removeEventListener("hashchange", updateRoute);
+      return () => window.removeEventListener("popstate", updateRoute);
     }
 
     let active = true;
@@ -717,7 +723,7 @@ function App() {
       if (!active) return;
       setSession(nextSession);
       if (event === "PASSWORD_RECOVERY") {
-        window.location.hash = "#/reset-password";
+        navigate("reset-password");
       }
       if (!nextSession) {
         setProfile(null);
@@ -743,7 +749,7 @@ function App() {
     return () => {
       active = false;
       authListener.subscription.unsubscribe();
-      window.removeEventListener("hashchange", updateRoute);
+      window.removeEventListener("popstate", updateRoute);
     };
   }, []);
 
@@ -987,7 +993,7 @@ function App() {
           password,
           options: {
             data: { full_name: fullName },
-            emailRedirectTo: `${window.location.origin}/#/onboarding`,
+            emailRedirectTo: routeUrl("onboarding"),
           },
         });
         if (authError) throw authError;
@@ -1023,7 +1029,7 @@ function App() {
       const { error: resendError } = await supabase.auth.resend({
         type: "signup",
         email: verificationEmail,
-        options: { emailRedirectTo: `${window.location.origin}/#/onboarding` },
+        options: { emailRedirectTo: routeUrl("onboarding") },
       });
       if (resendError) throw resendError;
       setNotice("A new confirmation link has been sent. Check your inbox and spam folder.");
@@ -1044,7 +1050,7 @@ function App() {
     setError(null);
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/#/onboarding` },
+      options: { redirectTo: routeUrl("onboarding") },
     });
     if (authError) {
       setError(authError.message);
@@ -1058,7 +1064,7 @@ function App() {
     setError(null);
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/#/reset-password`,
+        redirectTo: routeUrl("reset-password"),
       });
       if (resetError) throw resetError;
       setNotice("If an account exists for that email, a password reset link is on its way.");
@@ -1310,9 +1316,7 @@ function App() {
         return;
       }
     }
-    setError(null);
-    window.location.hash = "#/login";
-    setRoute("login");
+    navigate("login");
   };
 
   const pageError = error;
@@ -1599,6 +1603,7 @@ function App() {
         universities={universities}
         maintenanceStatus={maintenanceStatus}
         onMaintenanceChange={setMaintenanceStatusState}
+        onNavigate={navigate}
       />
     );
   }
@@ -2300,6 +2305,7 @@ function AdminWorkspace({
   universities,
   maintenanceStatus,
   onMaintenanceChange,
+  onNavigate,
 }: {
   access: AdminAccess | null;
   accessError: string | null;
@@ -2308,6 +2314,7 @@ function AdminWorkspace({
   universities: University[];
   maintenanceStatus: MaintenanceStatus | null;
   onMaintenanceChange: (status: MaintenanceStatus) => void;
+  onNavigate: (route: Route) => void;
 }) {
   const [section, setSection] = useState<
     | "overview"
@@ -2758,9 +2765,13 @@ function AdminWorkspace({
         <p>
           Run <code>supabase/admin-foundation.sql</code> in the Supabase SQL Editor.
         </p>
-        <a className="btn btn-secondary admin-return-link" href="#/home">
+        <button
+          type="button"
+          className="btn btn-secondary admin-return-link"
+          onClick={() => onNavigate("home")}
+        >
           Return to Rimbly
-        </a>
+        </button>
       </div>
     );
   }
@@ -2774,9 +2785,13 @@ function AdminWorkspace({
           Admin access is granted by a trusted project owner. Student accounts cannot enable
           administrator access themselves.
         </p>
-        <a className="btn btn-secondary admin-return-link" href="#/home">
+        <button
+          type="button"
+          className="btn btn-secondary admin-return-link"
+          onClick={() => onNavigate("home")}
+        >
           Return to Rimbly
-        </a>
+        </button>
       </div>
     );
   }
@@ -2786,7 +2801,7 @@ function AdminWorkspace({
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar">
-        <Logo onClick={() => (window.location.hash = "#/home")} />
+        <Logo onClick={() => onNavigate("home")} />
         <span className="admin-sidebar-label">ADMINISTRATION</span>
         <nav aria-label="Admin navigation">
           {adminNav
@@ -2801,10 +2816,14 @@ function AdminWorkspace({
               </button>
             ))}
         </nav>
-        <a className="admin-back-link" href="#/home">
+        <button
+          type="button"
+          className="admin-back-link"
+          onClick={() => onNavigate("home")}
+        >
           <span aria-hidden="true">←</span>
           Student app
-        </a>
+        </button>
       </aside>
       <main className="admin-content">
         <header className="admin-header">
