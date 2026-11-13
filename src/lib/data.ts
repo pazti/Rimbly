@@ -589,28 +589,52 @@ export async function extractAdminQuizQuestions(
   const sourceImages = await renderPaperPages(filePath, onProgress);
   const questions: ExtractedQuizQuestion[] = [];
   const client = requireSupabase();
-  const batchSize = 3;
-  for (let offset = 0; offset < sourceImages.length; offset += batchSize) {
-    const batch = sourceImages.slice(offset, offset + batchSize);
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (!sessionData.session) throw new Error("Sign in again before extracting questions.");
+
+  const batches: GroqSourceImage[][] = [];
+  let currentBatch: GroqSourceImage[] = [];
+  let currentBatchSize = 0;
+  for (const image of sourceImages) {
+    if (image.data_url.length > 2_500_000) {
+      throw new Error(`PDF page ${image.page_number} is too large to send for extraction.`);
+    }
+    if (
+      currentBatch.length &&
+      (currentBatch.length >= 3 || currentBatchSize + image.data_url.length > 3_500_000)
+    ) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBatchSize = 0;
+    }
+    currentBatch.push(image);
+    currentBatchSize += image.data_url.length;
+  }
+  if (currentBatch.length) batches.push(currentBatch);
+
+  for (const batch of batches) {
     onProgress(`Extracting pages ${batch[0].page_number}–${batch.at(-1)!.page_number}…`);
     try {
-      const { data, error } = await client.functions.invoke("extract-quiz-questions", {
-        body: { paper_id: paperId, images: batch },
+      const response = await fetch("/api/extract-quiz-questions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ paper_id: paperId, images: batch }),
       });
-      if (error) {
-        const errorResponse = error.context;
-        if (errorResponse instanceof Response) {
-          let responseData: { error?: unknown } | null = null;
-          try {
-            responseData = await errorResponse.clone().json();
-          } catch {
-            responseData = null;
-          }
-          if (typeof responseData?.error === "string") throw new Error(responseData.error);
-        }
-        throw error;
+      let data: { error?: unknown; questions?: unknown } | null = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
       }
-      if (data?.error) throw new Error(data.error);
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.error === "string" ? data.error : "Question extraction failed.",
+        );
+      }
       if (!Array.isArray(data?.questions)) {
         throw new Error("The extraction service returned an invalid question list.");
       }
