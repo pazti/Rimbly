@@ -38,6 +38,7 @@ react(),
       strictPort: true,
       allowedHosts: [
         'sb-76yssya9pdjy.vercel.run',
+        'sb-2u061jp8knhd.vercel.run',
         ...(process.env.CODESPACE_NAME
           ? [`${process.env.CODESPACE_NAME}-${process.env.PORT || '8443'}.app.github.dev`]
           : []),

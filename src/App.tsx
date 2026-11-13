@@ -129,9 +129,47 @@ const routes: Route[] = [
   "admin",
 ];
 
-const routeFromHash = (): Route => {
-  const hash = window.location.hash.replace(/^#\/?/, "");
-  return routes.includes(hash as Route) ? (hash as Route) : "welcome";
+const routeFromLocation = (): Route => {
+  const queryRoute = new URLSearchParams(window.location.search).get("route");
+  if (routes.includes(queryRoute as Route)) return queryRoute as Route;
+
+  const hashRoute = window.location.hash.replace(/^#\/?/, "");
+  return routes.includes(hashRoute as Route) ? (hashRoute as Route) : "welcome";
+};
+
+const routeUrl = (route: Route) => `${window.location.origin}/?route=${encodeURIComponent(route)}`;
+
+const adminQuestionPrompt = `Read the attached past-paper PDF and draft faithful multiple-choice questions using only information visible in the source. Do not invent wording, options, answers, or page references. Skip anything unclear rather than guessing.
+
+Return JSON only, with no Markdown fences, using this shape:
+{
+  "questions": [
+    {
+      "prompt": "Question text",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_index": 0,
+      "explanation": "Brief explanation only when supported by the source; otherwise an empty string.",
+      "source_page": 1,
+      "source_note": "Short source reference, or an empty string."
+    }
+  ]
+}
+
+Requirements:
+- Include only clearly legible multiple-choice questions, each with 2–6 non-empty options.
+- Preserve the original question meaning, symbols, units, and option order.
+- Use a zero-based correct_index only when the paper or answer key clearly confirms it; otherwise use null.
+- source_page must be the printed/original page number when identifiable, otherwise null.
+- Keep explanations and source notes concise. Never infer an answer from outside knowledge.
+- Return {"questions": []} if no reliable questions can be extracted.`;
+
+const getErrorMessage = (value: unknown, fallback: string) => {
+  if (value instanceof Error) return value.message;
+  if (typeof value === "object" && value !== null) {
+    const message = (value as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
 };
 
 const parseAdminRole = (value: string): AdminAccess["role"] | null =>
@@ -646,7 +684,7 @@ function CourseCard({
 }
 
 function App() {
-  const [route, setRoute] = useState<Route>(routeFromHash);
+  const [route, setRoute] = useState<Route>(routeFromLocation);
   const [verificationEmail, setVerificationEmail] = useState(
     () => window.sessionStorage.getItem("rimbly-verification-email") ?? "",
   );
@@ -700,16 +738,17 @@ function App() {
   const navigate = (next: Route) => {
     setError(null);
     setNotice(null);
-    window.location.hash = `#/${next}`;
+    window.history.pushState({ route: next }, "", routeUrl(next));
+    setRoute(next);
   };
 
   useEffect(() => {
-    const updateRoute = () => setRoute(routeFromHash());
-    window.addEventListener("hashchange", updateRoute);
+    const updateRoute = () => setRoute(routeFromLocation());
+    window.addEventListener("popstate", updateRoute);
 
     if (!supabase) {
       setAuthReady(true);
-      return () => window.removeEventListener("hashchange", updateRoute);
+      return () => window.removeEventListener("popstate", updateRoute);
     }
 
     let active = true;
@@ -717,7 +756,7 @@ function App() {
       if (!active) return;
       setSession(nextSession);
       if (event === "PASSWORD_RECOVERY") {
-        window.location.hash = "#/reset-password";
+        navigate("reset-password");
       }
       if (!nextSession) {
         setProfile(null);
@@ -743,7 +782,7 @@ function App() {
     return () => {
       active = false;
       authListener.subscription.unsubscribe();
-      window.removeEventListener("hashchange", updateRoute);
+      window.removeEventListener("popstate", updateRoute);
     };
   }, []);
 
@@ -987,7 +1026,7 @@ function App() {
           password,
           options: {
             data: { full_name: fullName },
-            emailRedirectTo: `${window.location.origin}/#/onboarding`,
+            emailRedirectTo: routeUrl("onboarding"),
           },
         });
         if (authError) throw authError;
@@ -1023,7 +1062,7 @@ function App() {
       const { error: resendError } = await supabase.auth.resend({
         type: "signup",
         email: verificationEmail,
-        options: { emailRedirectTo: `${window.location.origin}/#/onboarding` },
+        options: { emailRedirectTo: routeUrl("onboarding") },
       });
       if (resendError) throw resendError;
       setNotice("A new confirmation link has been sent. Check your inbox and spam folder.");
@@ -1044,7 +1083,7 @@ function App() {
     setError(null);
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/#/onboarding` },
+      options: { redirectTo: routeUrl("onboarding") },
     });
     if (authError) {
       setError(authError.message);
@@ -1058,7 +1097,7 @@ function App() {
     setError(null);
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/#/reset-password`,
+        redirectTo: routeUrl("reset-password"),
       });
       if (resetError) throw resetError;
       setNotice("If an account exists for that email, a password reset link is on its way.");
@@ -1310,9 +1349,7 @@ function App() {
         return;
       }
     }
-    setError(null);
-    window.location.hash = "#/login";
-    setRoute("login");
+    navigate("login");
   };
 
   const pageError = error;
@@ -1599,6 +1636,7 @@ function App() {
         universities={universities}
         maintenanceStatus={maintenanceStatus}
         onMaintenanceChange={setMaintenanceStatusState}
+        onNavigate={navigate}
       />
     );
   }
@@ -2300,6 +2338,7 @@ function AdminWorkspace({
   universities,
   maintenanceStatus,
   onMaintenanceChange,
+  onNavigate,
 }: {
   access: AdminAccess | null;
   accessError: string | null;
@@ -2308,6 +2347,7 @@ function AdminWorkspace({
   universities: University[];
   maintenanceStatus: MaintenanceStatus | null;
   onMaintenanceChange: (status: MaintenanceStatus) => void;
+  onNavigate: (route: Route) => void;
 }) {
   const [section, setSection] = useState<
     | "overview"
@@ -2427,9 +2467,7 @@ function AdminWorkspace({
         })
         .catch((searchError: unknown) => {
           if (active) {
-            setStudentsError(
-              searchError instanceof Error ? searchError.message : "Could not search students.",
-            );
+            setStudentsError(getErrorMessage(searchError, "Could not search students."));
             setStudentsLoading(false);
           }
         });
@@ -2758,9 +2796,13 @@ function AdminWorkspace({
         <p>
           Run <code>supabase/admin-foundation.sql</code> in the Supabase SQL Editor.
         </p>
-        <a className="btn btn-secondary admin-return-link" href="#/home">
+        <button
+          type="button"
+          className="btn btn-secondary admin-return-link"
+          onClick={() => onNavigate("home")}
+        >
           Return to Rimbly
-        </a>
+        </button>
       </div>
     );
   }
@@ -2774,9 +2816,13 @@ function AdminWorkspace({
           Admin access is granted by a trusted project owner. Student accounts cannot enable
           administrator access themselves.
         </p>
-        <a className="btn btn-secondary admin-return-link" href="#/home">
+        <button
+          type="button"
+          className="btn btn-secondary admin-return-link"
+          onClick={() => onNavigate("home")}
+        >
           Return to Rimbly
-        </a>
+        </button>
       </div>
     );
   }
@@ -2786,7 +2832,7 @@ function AdminWorkspace({
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar">
-        <Logo onClick={() => (window.location.hash = "#/home")} />
+        <Logo onClick={() => onNavigate("home")} />
         <span className="admin-sidebar-label">ADMINISTRATION</span>
         <nav aria-label="Admin navigation">
           {adminNav
@@ -2801,10 +2847,14 @@ function AdminWorkspace({
               </button>
             ))}
         </nav>
-        <a className="admin-back-link" href="#/home">
+        <button
+          type="button"
+          className="admin-back-link"
+          onClick={() => onNavigate("home")}
+        >
           <span aria-hidden="true">←</span>
           Student app
-        </a>
+        </button>
       </aside>
       <main className="admin-content">
         <header className="admin-header">
@@ -3525,6 +3575,8 @@ function AdminQuizWorkspace({
   const [reviewChangesSaved, setReviewChangesSaved] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractionProgress, setExtractionProgress] = useState<string | null>(null);
+  const [aiQuestionJson, setAiQuestionJson] = useState("");
+  const [promptCopied, setPromptCopied] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -3671,6 +3723,102 @@ function AdminQuizWorkspace({
     );
   };
 
+  const copyQuestionPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(adminQuestionPrompt);
+      setPromptCopied(true);
+      setNotice("AI prompt copied. Attach the source PDF in your AI tool, then paste its JSON result below.");
+    } catch {
+      setError("Could not access the clipboard. Open “View AI prompt” and copy the text manually.");
+    }
+  };
+
+  const importAiQuestions = () => {
+    setError(null);
+    setNotice(null);
+    try {
+      const source = aiQuestionJson
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, "");
+      const parsed: unknown = JSON.parse(source);
+      const candidates = Array.isArray(parsed)
+        ? parsed
+        : typeof parsed === "object" && parsed !== null && "questions" in parsed
+          ? (parsed as { questions?: unknown }).questions
+          : null;
+      if (!Array.isArray(candidates) || candidates.length === 0) {
+        throw new Error("Paste a JSON array of questions or an object with a questions array.");
+      }
+
+      const imported = candidates.map((candidate, index): DraftQuestion => {
+        if (typeof candidate !== "object" || candidate === null) {
+          throw new Error(`Question ${index + 1} is not a valid object.`);
+        }
+        const item = candidate as Record<string, unknown>;
+        const prompt = typeof item.prompt === "string" ? item.prompt.trim() : "";
+        const options = Array.isArray(item.options)
+          ? item.options.map((option) => (typeof option === "string" ? option.trim() : ""))
+          : [];
+        const answer = item.correct_index ?? null;
+        const page = item.source_page == null || item.source_page === "" ? null : Number(item.source_page);
+        const explanation = typeof item.explanation === "string" ? item.explanation.trim() : "";
+        const sourceNote = typeof item.source_note === "string" ? item.source_note.trim() : "";
+        if (!prompt || prompt.length > 2000 || options.length < 2 || options.length > 6) {
+          throw new Error(`Question ${index + 1} needs text and 2–6 answer options.`);
+        }
+        if (options.some((option) => !option || option.length > 500)) {
+          throw new Error(`Question ${index + 1} has an empty or overlong answer option.`);
+        }
+        if (explanation.length > 2000 || sourceNote.length > 500) {
+          throw new Error(`Question ${index + 1} has an overlong explanation or source note.`);
+        }
+        if (
+          answer !== null &&
+          (!Number.isInteger(answer) || Number(answer) < 0 || Number(answer) >= options.length)
+        ) {
+          throw new Error(`Question ${index + 1} has an invalid zero-based correct_index.`);
+        }
+        if (page !== null && (!Number.isInteger(page) || page < 1)) {
+          throw new Error(`Question ${index + 1} has an invalid source_page.`);
+        }
+
+        return {
+          prompt,
+          options,
+          correct_index: answer === null ? null : Number(answer),
+          explanation,
+          review_status: "pending",
+          source_page: page === null ? "" : String(page),
+          source_note: sourceNote,
+        };
+      });
+
+      const hasBlankStarter =
+        questions.length === 1 &&
+        !questions[0].prompt.trim() &&
+        questions[0].options.every((option) => !option.trim());
+      const currentQuestionCount = hasBlankStarter ? 0 : questions.length;
+      if (currentQuestionCount + imported.length > 100) {
+        throw new Error("A quiz can contain at most 100 questions.");
+      }
+      setQuestions((current) => {
+        const replaceBlankStarter =
+          current.length === 1 &&
+          !current[0].prompt.trim() &&
+          current[0].options.every((option) => !option.trim());
+        return replaceBlankStarter ? imported : [...current, ...imported];
+      });
+      setAiQuestionJson("");
+      setNotice(
+        `${imported.length} AI suggestions added as pending questions. Check each against the original before saving.`,
+      );
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (importError) {
+      setError(getErrorMessage(importError, "Could not import the AI question output."));
+    }
+  };
+
   const extractQuestions = async () => {
     if (!paperId || !selectedPaper) return;
     setExtracting(true);
@@ -3744,10 +3892,56 @@ function AdminQuizWorkspace({
         </div>
         {(canManage || (canReview && reviewingQuiz)) && (
           <p className="admin-quiz-guidance">
-            The original paper is retained as the source of truth. AI extraction only creates
-            suggestions; every structured question stays pending until a moderator checks and
-            approves it.
+            Upload and publish the PDF in <strong>Past questions</strong> first, then select it as
+            the source paper here. AI creates suggestions only; questions stay pending until a
+            different reviewer verifies them against the original.
           </p>
+        )}
+        {canManage && !reviewingQuiz && (
+          <section className="admin-ai-toolkit" aria-labelledby="admin-ai-toolkit-title">
+            <div className="admin-ai-toolkit-header">
+              <div>
+                <span className="eyebrow">AI-assisted authoring</span>
+                <h3 id="admin-ai-toolkit-title">Create questions from a PDF</h3>
+              </div>
+              <Button type="button" variant="secondary" onClick={() => void copyQuestionPrompt()}>
+                {promptCopied ? "Prompt copied" : "Copy AI prompt"}
+              </Button>
+            </div>
+            <p>
+              Upload the PDF under <strong>Past questions</strong>, then choose it below and use
+              <strong> Extract questions (AI assist)</strong>. Or copy this prompt into your own AI
+              tool with the PDF attached.
+            </p>
+            <details>
+              <summary>View the reusable AI prompt</summary>
+              <pre>{adminQuestionPrompt}</pre>
+            </details>
+            <details className="admin-ai-import">
+              <summary>Paste AI JSON to fill the question fields</summary>
+              <label htmlFor="admin-ai-question-json">AI-generated JSON</label>
+              <textarea
+                id="admin-ai-question-json"
+                rows={6}
+                value={aiQuestionJson}
+                onChange={(event) => setAiQuestionJson(event.target.value)}
+                placeholder='Paste a JSON object with a "questions" array.'
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!aiQuestionJson.trim()}
+                onClick={importAiQuestions}
+              >
+                Import as pending questions
+              </Button>
+            </details>
+            {promptCopied && (
+              <span className="sr-only" role="status">
+                AI prompt copied to clipboard.
+              </span>
+            )}
+          </section>
         )}
         {error && (
           <p className="app-feedback" role="alert">
