@@ -4476,6 +4476,82 @@ select {
   line-height: 1.6;
 }
 
+.admin-ai-toolkit {
+  display: grid;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #fff;
+}
+
+.admin-ai-toolkit-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-ai-toolkit-header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-ai-toolkit h3 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.admin-ai-toolkit > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.admin-ai-toolkit details {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.admin-ai-toolkit summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.admin-ai-toolkit pre {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-ai-import label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-ai-import textarea {
+  min-height: 140px;
+  height: auto;
+  padding: 10px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 .quiz-question-editor {
   min-width: 0;
   display: grid;

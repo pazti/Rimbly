@@ -885,9 +885,9 @@ export async function getAdminStudents(search: string) {
     p_search: search,
   });
   if (error) {
-    if (error.code === "PGRST202" || error.code === "42883") {
+    if (["PGRST202", "PGRST204", "42883", "42P01", "42703"].includes(error.code ?? "")) {
       throw new Error(
-        "Student search is not set up yet. Run supabase/admin-management.sql in the Supabase SQL Editor, then reload the admin page.",
+        "Student management setup is incomplete. Run supabase/admin-management.sql, then reload the admin page.",
       );
     }
     if (error.code === "42501") {
