@@ -15,30 +15,30 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    before retrying the migration.
 5. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate.
-6. Deploy these three Edge Functions from the repository root:
+6. Deploy the two Supabase Edge Functions from the repository root:
 
    ```sh
    supabase functions deploy admin-invite --project-ref YOUR_PROJECT_REF
    supabase functions deploy admin-student-access --project-ref YOUR_PROJECT_REF
-   supabase functions deploy extract-quiz-questions --project-ref YOUR_PROJECT_REF
    ```
 
-7. Configure function secrets in Supabase. Use the exact deployed app origin for
-   `APP_URL` and keep the service-role key only in Edge Function secrets:
+7. Configure the remaining function secrets in Supabase. Use the exact deployed
+   app origin for `APP_URL` and keep the service-role key only in Edge Function
+   secrets:
 
    ```sh
-   supabase secrets set --project-ref YOUR_PROJECT_REF \
-     APP_URL="https://your-app.example" \
-     SUPABASE_ANON_KEY="YOUR_PUBLIC_ANON_KEY" \
-     SUPABASE_SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY" \
-      GROQ_API_KEY="YOUR_GROQ_API_KEY"
+   supabase secrets set --project-ref YOUR_PROJECT_REF \\
+     APP_URL="https://your-app.example" \\
+     SUPABASE_ANON_KEY="YOUR_PUBLIC_ANON_KEY" \\
+     SUPABASE_SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY"
    ```
 
-   The extraction function defaults to Groq model `qwen/qwen3.8-27b`. Set
-   `GROQ_MODEL` if you want to use another Groq vision model that supports
-   structured outputs.
+8. Set `GROQ_API_KEY` as an unprefixed Vercel project environment variable for
+   Development, Preview, and Production. The Vercel `/api/extract-quiz-questions`
+   function reads it server-side. Optionally set `GROQ_MODEL`; it defaults to
+   `qwen/qwen3.8-27b`.
 
-8. Add the same app URL to Supabase Auth's allowed redirect URLs. Invitations
+9. Add the same app URL to Supabase Auth's allowed redirect URLs. Invitations
    redirect to `APP_URL/#/admin`.
 9. Keep the existing Super Admin membership assigned explicitly to a trusted
    user. Do not assign privileged roles from client-side profile metadata.
@@ -53,9 +53,10 @@ the database applies the same Super Admin exception to app data access. Team inv
 Student-submitted academic content remains private until an administrator reviews
 and approves it. Quiz questions must link to an approved source paper. Manual
 entry remains supported. The optional “Extract questions (AI assist)” action sends
-rendered page images to Groq using the `GROQ_API_KEY` Edge Function secret. PDF
-pages are rendered in the browser, and up to 60 pages are processed in batches
-of three to respect Groq vision limits. Extraction only creates editable pending
+rendered page images to Groq through the Vercel `/api/extract-quiz-questions`
+function, using the server-only `GROQ_API_KEY` Vercel variable. PDF pages are
+rendered in the browser, and up to 60 pages are processed in payload-sized batches
+to respect Vercel and Groq limits. Extraction only creates editable pending
 suggestions. A different authorized reviewer must inspect the original document,
 edit questions as needed, and approve individual questions before approved items
 can appear in quizzes or battles. Missing/uncertain answer keys are left unset

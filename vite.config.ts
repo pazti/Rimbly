@@ -1,8 +1,10 @@
-import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import fs from 'node:fs'
 import path from 'node:path'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { handleQuizExtraction } from './src/server/quiz-extraction'
 
 import siteConfiguration from './.figma/make/site.json'
 
@@ -10,6 +12,7 @@ import siteConfiguration from './.figma/make/site.json'
 // Vite config — https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
+  const environment = loadEnv(mode, process.cwd(), '')
   const emitSourcemaps = mode === 'development'
 
   return {
@@ -21,6 +24,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
 react(),
       tailwindcss(),
+      localQuizExtractionApi(environment),
       figmaSiteConfiguration(siteConfiguration),
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
@@ -37,8 +41,7 @@ react(),
       port: parseInt(process.env.PORT || '8443'),
       strictPort: true,
       allowedHosts: [
-        'sb-76yssya9pdjy.vercel.run',
-        'sb-2u061jp8knhd.vercel.run',
+        '.vercel.run',
         ...(process.env.CODESPACE_NAME
           ? [`${process.env.CODESPACE_NAME}-${process.env.PORT || '8443'}.app.github.dev`]
           : []),
@@ -454,6 +457,76 @@ function figmaLinkedPackageSourcemaps(): Plugin {
       })
       delete map.sourceRoot
       return { code: code.replace(sourceMappingUrl, ''), map }
+    },
+  }
+}
+
+function localQuizExtractionApi(environment: Record<string, string>): Plugin {
+  const middleware = async (
+    request: IncomingMessage,
+    response: ServerResponse,
+    next: (error?: Error) => void,
+  ) => {
+    if (request.method !== 'POST' && request.method !== 'OPTIONS') return next()
+    if (request.method === 'OPTIONS') {
+      response.statusCode = 204
+      response.end()
+      return
+    }
+
+    try {
+      const chunks: Buffer[] = []
+      let requestSize = 0
+      for await (const chunk of request) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        requestSize += buffer.length
+        if (requestSize > 4_000_000) {
+          response.statusCode = 413
+          response.setHeader('Content-Type', 'application/json; charset=utf-8')
+          response.end(JSON.stringify({ error: 'Rendered source pages are too large to extract.' }))
+          return
+        }
+        chunks.push(buffer)
+      }
+
+      const host = request.headers.host || 'localhost'
+      const forwardedProtocol = request.headers['x-forwarded-proto']
+      const protocol = Array.isArray(forwardedProtocol) ? forwardedProtocol[0] : forwardedProtocol || 'http'
+      const headers = new Headers()
+      for (const name of ['authorization', 'content-type', 'origin']) {
+        const value = request.headers[name]
+        if (typeof value === 'string') headers.set(name, value)
+      }
+      const webRequest = new Request(`${protocol}://${host}${request.url || '/'}`, {
+        method: 'POST',
+        headers,
+        body: Buffer.concat(chunks).toString('utf8'),
+      })
+      const result = await handleQuizExtraction(webRequest, {
+        GROQ_API_KEY: environment.GROQ_API_KEY,
+        GROQ_MODEL: environment.GROQ_MODEL,
+        VITE_SUPABASE_URL: environment.VITE_SUPABASE_URL,
+        VITE_SUPABASE_ANON_KEY: environment.VITE_SUPABASE_ANON_KEY,
+      })
+
+      response.statusCode = result.status
+      result.headers.forEach((value, name) => response.setHeader(name, value))
+      response.end(Buffer.from(await result.arrayBuffer()))
+    } catch {
+      response.statusCode = 500
+      response.setHeader('Content-Type', 'application/json; charset=utf-8')
+      response.setHeader('Cache-Control', 'no-store')
+      response.end(JSON.stringify({ error: 'Question extraction failed unexpectedly.' }))
+    }
+  }
+
+  return {
+    name: 'local-quiz-extraction-api',
+    configureServer(server) {
+      server.middlewares.use('/api/extract-quiz-questions', middleware)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/api/extract-quiz-questions', middleware)
     },
   }
 }
