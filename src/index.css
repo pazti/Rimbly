@@ -2908,21 +2908,21 @@ select {
   grid-template-columns: 240px 1fr;
   background: #eeeae5;
 }
-.admin-shell > aside {
+.admin-shell > aside:not(.admin-sidebar) {
   display: flex;
   flex-direction: column;
   padding: 24px 16px;
   border-right: 2px solid var(--ink);
   background: #fff;
 }
-.admin-shell > aside > .badge {
+.admin-shell > aside:not(.admin-sidebar) > .badge {
   margin: 14px 0 25px;
 }
-.admin-shell > aside nav {
+.admin-shell > aside:not(.admin-sidebar) nav {
   display: grid;
   gap: 5px;
 }
-.admin-shell > aside nav button {
+.admin-shell > aside:not(.admin-sidebar) nav button {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2934,7 +2934,7 @@ select {
   font-weight: 700;
   text-align: left;
 }
-.admin-shell > aside nav button.active {
+.admin-shell > aside:not(.admin-sidebar) nav button.active {
   border-color: var(--ink);
   background: var(--purple);
   box-shadow: 2px 2px 0 var(--ink);
@@ -4170,11 +4170,18 @@ select {
 
   .admin-sidebar nav {
     display: flex;
+    min-width: 0;
+    gap: 6px;
     overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
   }
 
   .admin-sidebar nav button {
-    flex: none;
+    flex: 0 0 auto;
     white-space: nowrap;
   }
 

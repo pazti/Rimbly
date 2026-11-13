@@ -2840,7 +2840,9 @@ function AdminWorkspace({
             .map((item) => (
               <button
                 key={item.key}
+                type="button"
                 className={section === item.key ? "active" : ""}
+                aria-current={section === item.key ? "page" : undefined}
                 onClick={() => setSection(item.key)}
               >
                 {item.label}
