@@ -1888,6 +1888,12 @@ function App() {
                         ? `${quiz.course_code} · ${quiz.university} · ${quiz.question_count} questions`
                         : `Source-linked quiz · ${quiz.question_count} questions`}
                     </small>
+                    <small className="quiz-audience-meta">
+                      Audience:{" "}
+                      {[quiz.target_university, quiz.target_department, quiz.target_level]
+                        .filter(Boolean)
+                        .join(" · ") || "All students"}
+                    </small>
                     <button
                       type="button"
                       className="quiz-source-link"
@@ -2849,11 +2855,7 @@ function AdminWorkspace({
               </button>
             ))}
         </nav>
-        <button
-          type="button"
-          className="admin-back-link"
-          onClick={() => onNavigate("home")}
-        >
+        <button type="button" className="admin-back-link" onClick={() => onNavigate("home")}>
           <span aria-hidden="true">←</span>
           Student app
         </button>
@@ -3106,6 +3108,7 @@ function AdminWorkspace({
               <AdminQuizWorkspace
                 quizzes={adminQuizzes}
                 papers={quizPapers}
+                universities={universities}
                 userId={userId}
                 canManage={canCreateQuizzes}
                 canReview={canReviewQuizzes}
@@ -3538,6 +3541,7 @@ function Stat({ icon, value, label }: { icon: string; value: string; label: stri
 function AdminQuizWorkspace({
   quizzes,
   papers,
+  universities,
   userId,
   canManage,
   canReview,
@@ -3545,6 +3549,7 @@ function AdminQuizWorkspace({
 }: {
   quizzes: AdminQuizSet[];
   papers: AdminQuizPaper[];
+  universities: University[];
   userId: string;
   canManage: boolean;
   canReview: boolean;
@@ -3571,6 +3576,10 @@ function AdminQuizWorkspace({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [paperId, setPaperId] = useState("");
+  const [targetUniversity, setTargetUniversity] = useState("");
+  const [targetDepartment, setTargetDepartment] = useState("");
+  const [targetLevel, setTargetLevel] = useState("");
+  const studyLevels = ["100 Level", "200 Level", "300 Level", "400 Level", "500 Level"];
   const [questions, setQuestions] = useState<DraftQuestion[]>([emptyQuestion()]);
   const [savedQuizId, setSavedQuizId] = useState<string | null>(null);
   const [reviewingQuiz, setReviewingQuiz] = useState(false);
@@ -3599,6 +3608,9 @@ function AdminQuizWorkspace({
         title: String(values.get("title") ?? ""),
         description: String(values.get("description") ?? ""),
         paperId: paperId || null,
+        targetUniversity: String(values.get("target_university") ?? ""),
+        targetDepartment: String(values.get("target_department") ?? "").trim(),
+        targetLevel: String(values.get("target_level") ?? ""),
         questions: questions.map((question) => ({
           prompt: question.prompt,
           options: question.options,
@@ -3636,6 +3648,9 @@ function AdminQuizWorkspace({
         setTitle("");
         setDescription("");
         setPaperId("");
+        setTargetUniversity("");
+        setTargetDepartment("");
+        setTargetLevel("");
         setReviewingQuiz(false);
         setReviewChangesSaved(false);
         setQuestions([emptyQuestion()]);
@@ -3668,6 +3683,9 @@ function AdminQuizWorkspace({
         setSavedQuizId(null);
         setReviewingQuiz(false);
         setReviewChangesSaved(false);
+        setTargetUniversity("");
+        setTargetDepartment("");
+        setTargetLevel("");
         setQuestions([emptyQuestion()]);
         formRef.current?.reset();
       }
@@ -3694,6 +3712,9 @@ function AdminQuizWorkspace({
       setTitle(draft.title);
       setDescription(draft.description);
       setPaperId(draft.paper_id ?? "");
+      setTargetUniversity(draft.target_university ?? "");
+      setTargetDepartment(draft.target_department ?? "");
+      setTargetLevel(draft.target_level ?? "");
       setQuestions(
         draft.questions.map((question) => ({
           ...question,
@@ -3729,7 +3750,9 @@ function AdminQuizWorkspace({
     try {
       await navigator.clipboard.writeText(adminQuestionPrompt);
       setPromptCopied(true);
-      setNotice("AI prompt copied. Attach the source PDF in your AI tool, then paste its JSON result below.");
+      setNotice(
+        "AI prompt copied. Attach the source PDF in your AI tool, then paste its JSON result below.",
+      );
     } catch {
       setError("Could not access the clipboard. Open “View AI prompt” and copy the text manually.");
     }
@@ -3763,7 +3786,8 @@ function AdminQuizWorkspace({
           ? item.options.map((option) => (typeof option === "string" ? option.trim() : ""))
           : [];
         const answer = item.correct_index ?? null;
-        const page = item.source_page == null || item.source_page === "" ? null : Number(item.source_page);
+        const page =
+          item.source_page == null || item.source_page === "" ? null : Number(item.source_page);
         const explanation = typeof item.explanation === "string" ? item.explanation.trim() : "";
         const sourceNote = typeof item.source_note === "string" ? item.source_note.trim() : "";
         if (!prompt || prompt.length > 2000 || options.length < 2 || options.length > 6) {
@@ -3978,6 +4002,55 @@ function AdminQuizWorkspace({
                 rows={3}
               />
             </label>
+            <fieldset className="quiz-audience-targeting">
+              <legend>Student audience</legend>
+              <p className="field-note">
+                Leave a field blank to make it unrestricted. Department and year match the
+                student&apos;s saved profile.
+              </p>
+              <div className="quiz-audience-fields">
+                <label>
+                  <span>University</span>
+                  <select
+                    name="target_university"
+                    value={targetUniversity}
+                    onChange={(event) => setTargetUniversity(event.target.value)}
+                  >
+                    <option value="">All universities</option>
+                    {universities.map((university) => (
+                      <option key={university.id} value={university.name}>
+                        {university.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Department (optional)</span>
+                  <input
+                    name="target_department"
+                    maxLength={120}
+                    value={targetDepartment}
+                    onChange={(event) => setTargetDepartment(event.target.value)}
+                    placeholder="Any department"
+                  />
+                </label>
+                <label>
+                  <span>Year of study (optional)</span>
+                  <select
+                    name="target_level"
+                    value={targetLevel}
+                    onChange={(event) => setTargetLevel(event.target.value)}
+                  >
+                    <option value="">All years</option>
+                    {studyLevels.map((level) => (
+                      <option key={level} value={level}>
+                        {level}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </fieldset>
             <label>
               <span>Source paper</span>
               <select
@@ -4247,7 +4320,11 @@ function AdminQuizWorkspace({
                     ? (papers.find((paper) => paper.id === quiz.paper_id)?.course_code ??
                       "Linked past paper")
                     : "Standalone source"}{" "}
-                  · {quiz.question_count} questions · Created by {quiz.creator_name}
+                  · {quiz.question_count} questions · Audience:{" "}
+                  {[quiz.target_university, quiz.target_department, quiz.target_level]
+                    .filter(Boolean)
+                    .join(" · ") || "All students"}{" "}
+                  · Created by {quiz.creator_name}
                 </small>
               </div>
               {quiz.paper_id && papers.some((paper) => paper.id === quiz.paper_id) && (

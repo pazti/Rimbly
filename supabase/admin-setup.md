@@ -8,21 +8,26 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    been applied.
 3. Run `admin-management.sql`.
 4. Run `quiz-battles.sql` to enable paper-linked question authoring, per-question
-   review, quiz attempts,
-   one-on-one battles, points, streaks, titles, university leaderboards, and
-   case-insensitive course-code uniqueness within each university. If the unique
-   index detects existing duplicate course records, merge their linked content
-   before retrying the migration.
-5. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
+   review, quiz attempts, one-on-one battles, points, streaks, titles, university
+   leaderboards, and case-insensitive course-code uniqueness within each
+   university. If the unique index detects existing duplicate course records,
+   merge their linked content before retrying the migration.
+5. Run `quiz-audience-targeting.sql` to add optional university, department, and
+   year-of-study targeting to quizzes. Existing quizzes remain available to all
+   students. The department is free text matched case-insensitively to the
+   student profile; year of study uses the existing 100–500 Level values. If you
+   cannot connect Supabase from v0, open the Supabase Dashboard and go to SQL
+   Editor → New query. Paste the contents of this file and select Run.
+6. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate.
-6. Deploy the two Supabase Edge Functions from the repository root:
+7. Deploy the two Supabase Edge Functions from the repository root:
 
    ```sh
    supabase functions deploy admin-invite --project-ref YOUR_PROJECT_REF
    supabase functions deploy admin-student-access --project-ref YOUR_PROJECT_REF
    ```
 
-7. Configure the remaining function secrets in Supabase. Use the exact deployed
+8. Configure the remaining function secrets in Supabase. Use the exact deployed
    app origin for `APP_URL` and keep the service-role key only in Edge Function
    secrets:
 
@@ -33,14 +38,14 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
      SUPABASE_SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY"
    ```
 
-8. Set `GROQ_API_KEY` as an unprefixed Vercel project environment variable for
+9. Set `GROQ_API_KEY` as an unprefixed Vercel project environment variable for
    Development, Preview, and Production. The Vercel `/api/extract-quiz-questions`
    function reads it server-side. Optionally set `GROQ_MODEL`; it defaults to
    `qwen/qwen3.8-27b`.
 
-9. Add the same app URL to Supabase Auth's allowed redirect URLs. Invitations
+10. Add the same app URL to Supabase Auth's allowed redirect URLs. Invitations
    redirect to `APP_URL/#/admin`.
-9. Keep the existing Super Admin membership assigned explicitly to a trusted
+11. Keep the existing Super Admin membership assigned explicitly to a trusted
    user. Do not assign privileged roles from client-side profile metadata.
 
 The workspace provides the overview, contribution queue, direct paper upload,
