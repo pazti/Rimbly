@@ -4362,6 +4362,16 @@ select {
   color: var(--muted);
 }
 
+.quiz-catalog-card .quiz-audience-meta {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--purple-pale);
+  color: var(--purple-dark);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .quiz-source-link {
   width: fit-content;
   padding: 0;
@@ -4483,6 +4493,45 @@ select {
   line-height: 1.6;
 }
 
+.quiz-audience-targeting {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfaff;
+}
+
+.quiz-audience-targeting legend {
+  padding-inline: 8px;
+  font-weight: 800;
+}
+
+.quiz-audience-targeting > p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.quiz-audience-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 800px) {
+  .quiz-audience-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .quiz-audience-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .admin-ai-toolkit {
   display: grid;
   gap: 13px;
@@ -4540,7 +4589,11 @@ select {
   border-radius: 8px;
   background: #fff;
   color: var(--ink);
-  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    12px/1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -4556,7 +4609,11 @@ select {
   min-height: 140px;
   height: auto;
   padding: 10px;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 
 .quiz-question-editor {

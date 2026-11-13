@@ -55,6 +55,9 @@ export interface QuizSet {
   course_code: string | null;
   course_title: string | null;
   university: string | null;
+  target_university: string | null;
+  target_department: string | null;
+  target_level: string | null;
   source_file_path: string;
   source_file_name: string;
   question_count: number;
@@ -68,6 +71,9 @@ export interface AdminQuizSet {
   paper_id: string | null;
   question_count: number;
   created_at: string;
+  target_university: string | null;
+  target_department: string | null;
+  target_level: string | null;
   status: "draft" | "pending_review" | "needs_revision" | "published" | "archived";
   created_by: string;
   creator_name: string;
@@ -78,6 +84,9 @@ export interface AdminQuizDraft {
   title: string;
   description: string;
   paper_id: string | null;
+  target_university: string | null;
+  target_department: string | null;
+  target_level: string | null;
   source_file_path: string | null;
   source_file_name: string | null;
   review_status: AdminQuizSet["status"];
@@ -343,8 +352,15 @@ export async function getQuestions(paperId: string) {
 }
 
 export async function getPublishedQuizSets() {
-  const { data, error } = await requireSupabase().rpc("get_published_quiz_sets");
-  if (error) throw error;
+  const { data, error } = await requireSupabase().rpc("get_published_quiz_sets_for_current_user");
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+      );
+    }
+    throw error;
+  }
   return (data ?? []) as QuizSet[];
 }
 
@@ -412,16 +428,30 @@ export async function getLeaderboard(university?: string | null) {
 }
 
 export async function getAdminQuizSets() {
-  const { data, error } = await requireSupabase().rpc("admin_list_quiz_sets");
-  if (error) throw error;
+  const { data, error } = await requireSupabase().rpc("admin_list_quiz_sets_with_audience");
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+      );
+    }
+    throw error;
+  }
   return (data ?? []) as AdminQuizSet[];
 }
 
 export async function getAdminQuizDraft(quizId: string) {
-  const { data, error } = await requireSupabase().rpc("admin_get_quiz_draft", {
+  const { data, error } = await requireSupabase().rpc("admin_get_quiz_draft_with_audience", {
     p_quiz_id: quizId,
   });
-  if (error) throw error;
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+      );
+    }
+    throw error;
+  }
   return data as AdminQuizDraft;
 }
 
@@ -436,6 +466,9 @@ export async function saveAdminQuizDraft(input: {
   title: string;
   description: string;
   paperId: string | null;
+  targetUniversity: string;
+  targetDepartment: string;
+  targetLevel: string;
   sourceFile?: File | null;
   questions: Array<{
     prompt: string;
@@ -468,7 +501,7 @@ export async function saveAdminQuizDraft(input: {
       });
     if (uploadError) throw uploadError;
   }
-  const { data, error } = await client.rpc("admin_save_quiz_draft", {
+  const { data, error } = await client.rpc("admin_save_quiz_draft_with_audience", {
     p_quiz_id: input.id,
     p_title: input.title,
     p_description: input.description,
@@ -476,8 +509,18 @@ export async function saveAdminQuizDraft(input: {
     p_questions: input.questions,
     p_source_file_path: sourcePath,
     p_source_file_name: input.sourceFile?.name ?? null,
+    p_target_university: input.targetUniversity || null,
+    p_target_department: input.targetDepartment || null,
+    p_target_level: input.targetLevel || null,
   });
-  if (error) throw error;
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+      );
+    }
+    throw error;
+  }
   return data as string;
 }
 
