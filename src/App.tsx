@@ -1886,26 +1886,28 @@ function App() {
                     <small>
                       {quiz.course_code
                         ? `${quiz.course_code} · ${quiz.university} · ${quiz.question_count} questions`
-                        : `Source-linked quiz · ${quiz.question_count} questions`}
+                        : `Practice quiz · ${quiz.question_count} questions`}
                     </small>
                     <small className="quiz-audience-meta">
-                      Audience:{" "}
-                      {[quiz.target_university, quiz.target_department, quiz.target_level]
+                      Labels:{" "}
+                      {[quiz.audience_university, quiz.audience_department, quiz.audience_level]
                         .filter(Boolean)
-                        .join(" · ") || "All students"}
+                        .join(" · ") || "No audience labels"}
                     </small>
-                    <button
-                      type="button"
-                      className="quiz-source-link"
-                      onClick={() =>
-                        setSourceToRead({
-                          path: quiz.source_file_path,
-                          title: `Original source: ${quiz.title}`,
-                        })
-                      }
-                    >
-                      Read source in viewer: {quiz.source_file_name}
-                    </button>
+                    {quiz.source_file_path && (
+                      <button
+                        type="button"
+                        className="quiz-source-link"
+                        onClick={() =>
+                          setSourceToRead({
+                            path: quiz.source_file_path!,
+                            title: `Original source: ${quiz.title}`,
+                          })
+                        }
+                      >
+                        Read source in viewer: {quiz.source_file_name ?? "Source paper"}
+                      </button>
+                    )}
                   </div>
                   <Button disabled={busy} onClick={() => void startQuiz(quiz.id)}>
                     {busy ? "Loading…" : "Take quiz"}
@@ -1916,7 +1918,7 @@ function App() {
           ) : (
             <EmptyState
               title="No published quizzes yet"
-              text="Admins are adding source-linked questions and reviewing each one. You can still read past papers in the library."
+              text="Admins are adding reviewed quiz sets. You can still read past papers in the library."
               action="Browse past questions"
               onAction={() => navigate("practice")}
             />
@@ -3576,9 +3578,9 @@ function AdminQuizWorkspace({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [paperId, setPaperId] = useState("");
-  const [targetUniversity, setTargetUniversity] = useState("");
-  const [targetDepartment, setTargetDepartment] = useState("");
-  const [targetLevel, setTargetLevel] = useState("");
+  const [audienceUniversity, setAudienceUniversity] = useState("");
+  const [audienceDepartment, setAudienceDepartment] = useState("");
+  const [audienceLevel, setAudienceLevel] = useState("");
   const studyLevels = ["100 Level", "200 Level", "300 Level", "400 Level", "500 Level"];
   const [questions, setQuestions] = useState<DraftQuestion[]>([emptyQuestion()]);
   const [savedQuizId, setSavedQuizId] = useState<string | null>(null);
@@ -3608,9 +3610,9 @@ function AdminQuizWorkspace({
         title: String(values.get("title") ?? ""),
         description: String(values.get("description") ?? ""),
         paperId: paperId || null,
-        targetUniversity: String(values.get("target_university") ?? ""),
-        targetDepartment: String(values.get("target_department") ?? "").trim(),
-        targetLevel: String(values.get("target_level") ?? ""),
+        audienceUniversity: String(values.get("audience_university") ?? ""),
+        audienceDepartment: String(values.get("audience_department") ?? "").trim(),
+        audienceLevel: String(values.get("audience_level") ?? ""),
         questions: questions.map((question) => ({
           prompt: question.prompt,
           options: question.options,
@@ -3648,9 +3650,9 @@ function AdminQuizWorkspace({
         setTitle("");
         setDescription("");
         setPaperId("");
-        setTargetUniversity("");
-        setTargetDepartment("");
-        setTargetLevel("");
+        setAudienceUniversity("");
+        setAudienceDepartment("");
+        setAudienceLevel("");
         setReviewingQuiz(false);
         setReviewChangesSaved(false);
         setQuestions([emptyQuestion()]);
@@ -3683,9 +3685,9 @@ function AdminQuizWorkspace({
         setSavedQuizId(null);
         setReviewingQuiz(false);
         setReviewChangesSaved(false);
-        setTargetUniversity("");
-        setTargetDepartment("");
-        setTargetLevel("");
+        setAudienceUniversity("");
+        setAudienceDepartment("");
+        setAudienceLevel("");
         setQuestions([emptyQuestion()]);
         formRef.current?.reset();
       }
@@ -3712,9 +3714,9 @@ function AdminQuizWorkspace({
       setTitle(draft.title);
       setDescription(draft.description);
       setPaperId(draft.paper_id ?? "");
-      setTargetUniversity(draft.target_university ?? "");
-      setTargetDepartment(draft.target_department ?? "");
-      setTargetLevel(draft.target_level ?? "");
+      setAudienceUniversity(draft.audience_university ?? "");
+      setAudienceDepartment(draft.audience_department ?? "");
+      setAudienceLevel(draft.audience_level ?? "");
       setQuestions(
         draft.questions.map((question) => ({
           ...question,
@@ -3726,7 +3728,7 @@ function AdminQuizWorkspace({
       );
       setNotice(
         forReview
-          ? "Review the original paper and each question. Save your decisions before publishing."
+          ? "Review each question and answer key, and check any attached source. Save your decisions before publishing."
           : "Draft loaded for editing.",
       );
       formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -3908,7 +3910,7 @@ function AdminQuizWorkspace({
             </span>
             <h2>
               {reviewingQuiz
-                ? "Review questions against the original"
+                ? "Review questions and attached sources"
                 : canManage
                   ? "Create a question set"
                   : "Pending question sets"}
@@ -3918,9 +3920,9 @@ function AdminQuizWorkspace({
         </div>
         {(canManage || (canReview && reviewingQuiz)) && (
           <p className="admin-quiz-guidance">
-            Upload and publish the PDF in <strong>Past questions</strong> first, then select it as
-            the source paper here. AI creates suggestions only; questions stay pending until a
-            different reviewer verifies them against the original.
+            A source paper is optional. Link one to review against an original PDF or use
+            Groq&apos;s page extraction; otherwise create questions manually or paste AI-generated
+            JSON. Each quiz still goes through a separate human review before publishing.
           </p>
         )}
         {canManage && !reviewingQuiz && (
@@ -3935,9 +3937,8 @@ function AdminQuizWorkspace({
               </Button>
             </div>
             <p>
-              Upload the PDF under <strong>Past questions</strong>, then choose it below and use
-              <strong> Extract questions (AI assist)</strong>. Or copy this prompt into your own AI
-              tool with the PDF attached.
+              For Groq page extraction, upload a PDF under <strong>Past questions</strong> and
+              select it below. Source papers are optional for manual quizzes and pasted AI JSON.
             </p>
             <details>
               <summary>View the reusable AI prompt</summary>
@@ -4003,20 +4004,19 @@ function AdminQuizWorkspace({
               />
             </label>
             <fieldset className="quiz-audience-targeting">
-              <legend>Student audience</legend>
+              <legend>Audience labels</legend>
               <p className="field-note">
-                Leave a field blank to make it unrestricted. Department and year match the
-                student&apos;s saved profile.
+                These labels are informational only and never restrict who can view or take a quiz.
               </p>
               <div className="quiz-audience-fields">
                 <label>
-                  <span>University</span>
+                  <span>University label</span>
                   <select
-                    name="target_university"
-                    value={targetUniversity}
-                    onChange={(event) => setTargetUniversity(event.target.value)}
+                    name="audience_university"
+                    value={audienceUniversity}
+                    onChange={(event) => setAudienceUniversity(event.target.value)}
                   >
-                    <option value="">All universities</option>
+                    <option value="">No university label</option>
                     {universities.map((university) => (
                       <option key={university.id} value={university.name}>
                         {university.name}
@@ -4025,23 +4025,23 @@ function AdminQuizWorkspace({
                   </select>
                 </label>
                 <label>
-                  <span>Department (optional)</span>
+                  <span>Department label (optional)</span>
                   <input
-                    name="target_department"
+                    name="audience_department"
                     maxLength={120}
-                    value={targetDepartment}
-                    onChange={(event) => setTargetDepartment(event.target.value)}
-                    placeholder="Any department"
+                    value={audienceDepartment}
+                    onChange={(event) => setAudienceDepartment(event.target.value)}
+                    placeholder="Department name"
                   />
                 </label>
                 <label>
-                  <span>Year of study (optional)</span>
+                  <span>Year / level label (optional)</span>
                   <select
-                    name="target_level"
-                    value={targetLevel}
-                    onChange={(event) => setTargetLevel(event.target.value)}
+                    name="audience_level"
+                    value={audienceLevel}
+                    onChange={(event) => setAudienceLevel(event.target.value)}
                   >
-                    <option value="">All years</option>
+                    <option value="">No year label</option>
                     {studyLevels.map((level) => (
                       <option key={level} value={level}>
                         {level}
@@ -4052,20 +4052,23 @@ function AdminQuizWorkspace({
               </div>
             </fieldset>
             <label>
-              <span>Source paper</span>
+              <span>Reference paper (optional)</span>
               <select
-                required
                 value={paperId}
-                disabled={Boolean(savedQuizId)}
+                disabled={Boolean(savedQuizId && paperId)}
                 onChange={(event) => setPaperId(event.target.value)}
               >
-                <option value="">Select an approved source paper</option>
+                <option value="">No source paper</option>
                 {papers.map((paper) => (
                   <option key={paper.id} value={paper.id}>
                     {paper.university} · {paper.course_code} · {paper.academic_session}
                   </option>
                 ))}
               </select>
+              <small className="field-note">
+                Optional. You can add a paper later, but once linked it cannot be changed. A source
+                enables the original viewer and Groq page extraction.
+              </small>
             </label>
             {selectedPaper && (
               <div className="admin-actions">
@@ -4319,11 +4322,11 @@ function AdminQuizWorkspace({
                   {quiz.paper_id
                     ? (papers.find((paper) => paper.id === quiz.paper_id)?.course_code ??
                       "Linked past paper")
-                    : "Standalone source"}{" "}
-                  · {quiz.question_count} questions · Audience:{" "}
-                  {[quiz.target_university, quiz.target_department, quiz.target_level]
+                    : "No source paper"}{" "}
+                  · {quiz.question_count} questions · Labels:{" "}
+                  {[quiz.audience_university, quiz.audience_department, quiz.audience_level]
                     .filter(Boolean)
-                    .join(" · ") || "All students"}{" "}
+                    .join(" · ") || "No audience labels"}{" "}
                   · Created by {quiz.creator_name}
                 </small>
               </div>
@@ -4375,7 +4378,7 @@ function AdminQuizWorkspace({
         ) : (
           <EmptyState
             title="No quiz sets yet"
-            text="Create a source-linked question set. It stays unpublished until another reviewer approves questions."
+            text="Create a question set with or without a source paper. It stays unpublished until another reviewer approves its questions."
           />
         )}
       </section>

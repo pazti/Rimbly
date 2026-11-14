@@ -55,11 +55,11 @@ export interface QuizSet {
   course_code: string | null;
   course_title: string | null;
   university: string | null;
-  target_university: string | null;
-  target_department: string | null;
-  target_level: string | null;
-  source_file_path: string;
-  source_file_name: string;
+  audience_university: string | null;
+  audience_department: string | null;
+  audience_level: string | null;
+  source_file_path: string | null;
+  source_file_name: string | null;
   question_count: number;
   created_at: string;
 }
@@ -71,9 +71,9 @@ export interface AdminQuizSet {
   paper_id: string | null;
   question_count: number;
   created_at: string;
-  target_university: string | null;
-  target_department: string | null;
-  target_level: string | null;
+  audience_university: string | null;
+  audience_department: string | null;
+  audience_level: string | null;
   status: "draft" | "pending_review" | "needs_revision" | "published" | "archived";
   created_by: string;
   creator_name: string;
@@ -84,9 +84,9 @@ export interface AdminQuizDraft {
   title: string;
   description: string;
   paper_id: string | null;
-  target_university: string | null;
-  target_department: string | null;
-  target_level: string | null;
+  audience_university: string | null;
+  audience_department: string | null;
+  audience_level: string | null;
   source_file_path: string | null;
   source_file_name: string | null;
   review_status: AdminQuizSet["status"];
@@ -356,7 +356,7 @@ export async function getPublishedQuizSets() {
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new Error(
-        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+        "The quiz audience labels and optional source paper migration has not been applied yet. Apply supabase/quiz-audience-targeting.sql through the project's authorized migration workflow.",
       );
     }
     throw error;
@@ -432,7 +432,7 @@ export async function getAdminQuizSets() {
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new Error(
-        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+        "The quiz audience labels and optional source paper migration has not been applied yet. Apply supabase/quiz-audience-targeting.sql through the project's authorized migration workflow.",
       );
     }
     throw error;
@@ -447,7 +447,7 @@ export async function getAdminQuizDraft(quizId: string) {
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new Error(
-        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+        "The quiz audience labels and optional source paper migration has not been applied yet. Apply supabase/quiz-audience-targeting.sql through the project's authorized migration workflow.",
       );
     }
     throw error;
@@ -466,9 +466,9 @@ export async function saveAdminQuizDraft(input: {
   title: string;
   description: string;
   paperId: string | null;
-  targetUniversity: string;
-  targetDepartment: string;
-  targetLevel: string;
+  audienceUniversity: string;
+  audienceDepartment: string;
+  audienceLevel: string;
   sourceFile?: File | null;
   questions: Array<{
     prompt: string;
@@ -509,14 +509,14 @@ export async function saveAdminQuizDraft(input: {
     p_questions: input.questions,
     p_source_file_path: sourcePath,
     p_source_file_name: input.sourceFile?.name ?? null,
-    p_target_university: input.targetUniversity || null,
-    p_target_department: input.targetDepartment || null,
-    p_target_level: input.targetLevel || null,
+    p_audience_university: input.audienceUniversity || null,
+    p_audience_department: input.audienceDepartment || null,
+    p_audience_level: input.audienceLevel || null,
   });
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new Error(
-        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+        "The quiz audience labels and optional source paper migration has not been applied yet. Apply supabase/quiz-audience-targeting.sql through the project's authorized migration workflow.",
       );
     }
     throw error;

@@ -12,12 +12,14 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    leaderboards, and case-insensitive course-code uniqueness within each
    university. If the unique index detects existing duplicate course records,
    merge their linked content before retrying the migration.
-5. Run `quiz-audience-targeting.sql` to add optional university, department, and
-   year-of-study targeting to quizzes. Existing quizzes remain available to all
-   students. The department is free text matched case-insensitively to the
-   student profile; year of study uses the existing 100–500 Level values. If you
-   cannot connect Supabase from v0, open the Supabase Dashboard and go to SQL
-   Editor → New query. Paste the contents of this file and select Run.
+5. Apply `quiz-audience-targeting.sql` through the project's authorized Supabase
+   migration workflow to add optional university, department, and year-of-study
+   labels and allow quizzes without a source paper. These labels do not restrict
+   student access; existing quizzes remain unchanged. Department is free text and
+   year uses the existing 100–500 Level values. Paperless quizzes can be practiced
+   or used in battles after human review. The app changes are prepared in the
+   repository, but this migration must be applied before the live database can
+   save or publish paperless quizzes.
 6. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate.
 7. Deploy the two Supabase Edge Functions from the repository root:
@@ -56,17 +58,19 @@ Super Admins can use the full website. Everyone else sees the countdown page;
 the database applies the same Super Admin exception to app data access. Team invites activate only after the invited user signs in with the invited, verified email.
 
 Student-submitted academic content remains private until an administrator reviews
-and approves it. Quiz questions must link to an approved source paper. Manual
-entry remains supported. The optional “Extract questions (AI assist)” action sends
-rendered page images to Groq through the Vercel `/api/extract-quiz-questions`
-function, using the server-only `GROQ_API_KEY` Vercel variable. PDF pages are
-rendered in the browser, and up to 60 pages are processed in payload-sized batches
-to respect Vercel and Groq limits. Extraction only creates editable pending
-suggestions. A different authorized reviewer must inspect the original document,
-edit questions as needed, and approve individual questions before approved items
-can appear in quizzes or battles. Missing/uncertain answer keys are left unset
-for a moderator to resolve. Free-tier rate limits can delay or interrupt large
-extractions; retry later or enter questions manually.
+and approves it. A quiz can be created without a source paper; when a paper is
+linked, it must be approved. Manual question entry works for both paperless and
+paper-backed quizzes. The optional “Extract questions (AI assist)” action is
+available only when an approved source paper is linked. It sends rendered page
+images to Groq through the Vercel `/api/extract-quiz-questions` function, using the
+server-only `GROQ_API_KEY` Vercel variable. PDF pages are rendered in the browser,
+and up to 60 pages are processed in payload-sized batches to respect Vercel and
+Groq limits. Extraction only creates editable pending suggestions. A different
+authorized reviewer must inspect the original document, edit questions as needed,
+and approve individual questions before approved items can appear in quizzes or
+battles. Missing/uncertain answer keys are left unset for a moderator to resolve.
+Free-tier rate limits can delay or interrupt large extractions; retry later or
+enter questions manually.
 
 The original PDF/image remains stored as the source of truth and is displayed in
 the in-app viewer with a light account watermark and no download control. This
