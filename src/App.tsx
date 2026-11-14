@@ -4905,8 +4905,10 @@ function BattlePage({
           </select>
         </label>
         <label className="search-field">
+          <span className="sr-only">Find a player at your university</span>
           <span aria-hidden="true">⌕</span>
           <input
+            type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Find a player at your university"
