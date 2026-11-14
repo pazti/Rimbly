@@ -54,12 +54,13 @@ export interface QuizSet {
   paper_id: string | null;
   course_code: string | null;
   course_title: string | null;
+  course_department: string | null;
   university: string | null;
-  target_university: string | null;
-  target_department: string | null;
-  target_level: string | null;
-  source_file_path: string;
-  source_file_name: string;
+  audience_university: string | null;
+  audience_department: string | null;
+  audience_level: string | null;
+  source_file_path: string | null;
+  source_file_name: string | null;
   question_count: number;
   created_at: string;
 }
@@ -69,11 +70,12 @@ export interface AdminQuizSet {
   title: string;
   description: string;
   paper_id: string | null;
+  replaces_quiz_id: string | null;
   question_count: number;
   created_at: string;
-  target_university: string | null;
-  target_department: string | null;
-  target_level: string | null;
+  audience_university: string | null;
+  audience_department: string | null;
+  audience_level: string | null;
   status: "draft" | "pending_review" | "needs_revision" | "published" | "archived";
   created_by: string;
   creator_name: string;
@@ -84,9 +86,10 @@ export interface AdminQuizDraft {
   title: string;
   description: string;
   paper_id: string | null;
-  target_university: string | null;
-  target_department: string | null;
-  target_level: string | null;
+  replaces_quiz_id: string | null;
+  audience_university: string | null;
+  audience_department: string | null;
+  audience_level: string | null;
   source_file_path: string | null;
   source_file_name: string | null;
   review_status: AdminQuizSet["status"];
@@ -356,7 +359,7 @@ export async function getPublishedQuizSets() {
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new Error(
-        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+        "The quiz audience labels and optional source paper migration has not been applied yet. Apply supabase/quiz-audience-targeting.sql through the project's authorized migration workflow.",
       );
     }
     throw error;
@@ -432,7 +435,7 @@ export async function getAdminQuizSets() {
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new Error(
-        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+        "The quiz audience labels and optional source paper migration has not been applied yet. Apply supabase/quiz-audience-targeting.sql through the project's authorized migration workflow.",
       );
     }
     throw error;
@@ -447,7 +450,7 @@ export async function getAdminQuizDraft(quizId: string) {
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new Error(
-        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+        "The quiz audience labels and optional source paper migration has not been applied yet. Apply supabase/quiz-audience-targeting.sql through the project's authorized migration workflow.",
       );
     }
     throw error;
@@ -461,14 +464,29 @@ export async function getAdminQuizPapers() {
   return (data ?? []) as AdminQuizPaper[];
 }
 
+export async function createAdminQuizRevision(quizId: string) {
+  const { data, error } = await requireSupabase().rpc("admin_create_quiz_revision", {
+    p_quiz_id: quizId,
+  });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Published-quiz revisions are not installed yet. Apply supabase/quiz-revisions.sql through the project's authorized migration workflow.",
+      );
+    }
+    throw error;
+  }
+  return data as string;
+}
+
 export async function saveAdminQuizDraft(input: {
   id: string | null;
   title: string;
   description: string;
   paperId: string | null;
-  targetUniversity: string;
-  targetDepartment: string;
-  targetLevel: string;
+  audienceUniversity: string;
+  audienceDepartment: string;
+  audienceLevel: string;
   sourceFile?: File | null;
   questions: Array<{
     prompt: string;
@@ -509,14 +527,14 @@ export async function saveAdminQuizDraft(input: {
     p_questions: input.questions,
     p_source_file_path: sourcePath,
     p_source_file_name: input.sourceFile?.name ?? null,
-    p_target_university: input.targetUniversity || null,
-    p_target_department: input.targetDepartment || null,
-    p_target_level: input.targetLevel || null,
+    p_audience_university: input.audienceUniversity || null,
+    p_audience_department: input.audienceDepartment || null,
+    p_audience_level: input.audienceLevel || null,
   });
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new Error(
-        "Quiz audience targeting is not installed yet. In the Supabase Dashboard, open SQL Editor and run supabase/quiz-audience-targeting.sql.",
+        "The quiz audience labels and optional source paper migration has not been applied yet. Apply supabase/quiz-audience-targeting.sql through the project's authorized migration workflow.",
       );
     }
     throw error;
@@ -552,6 +570,42 @@ type GroqSourceImage = {
   page_number: number;
   data_url: string;
 };
+
+type QuizExtractionResponse = {
+  error?: unknown;
+  questions?: unknown;
+  retry_after_seconds?: unknown;
+};
+
+const MAX_AUTOMATIC_RATE_LIMIT_WAIT_SECONDS = 90;
+
+const getRetryAfterSeconds = (response: Response, data: QuizExtractionResponse | null) => {
+  const bodyValue = data?.retry_after_seconds;
+  if (typeof bodyValue === "number" && Number.isFinite(bodyValue) && bodyValue >= 0) {
+    return Math.max(1, Math.ceil(bodyValue));
+  }
+  const headerValue = response.headers.get("retry-after");
+  if (!headerValue) return null;
+  const headerSeconds = Number(headerValue);
+  if (Number.isFinite(headerSeconds) && headerSeconds >= 0)
+    return Math.max(1, Math.ceil(headerSeconds));
+  const retryAt = Date.parse(headerValue);
+  return Number.isNaN(retryAt) ? null : Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+};
+
+const formatRetryDelay = (seconds: number) =>
+  seconds < 60
+    ? `${seconds} seconds`
+    : `${Math.floor(seconds / 60)} minute${Math.floor(seconds / 60) === 1 ? "" : "s"}${seconds % 60 ? ` ${seconds % 60} seconds` : ""}`;
+
+async function waitForRateLimit(seconds: number, onProgress: (progress: string) => void) {
+  const retryAt = Date.now() + seconds * 1000;
+  while (Date.now() < retryAt) {
+    const remaining = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+    onProgress(`Groq is rate-limiting extraction. Retrying in ${remaining}s…`);
+    await new Promise((resolve) => setTimeout(resolve, Math.min(1000, remaining * 1000)));
+  }
+}
 
 async function renderPaperPages(
   filePath: string,
@@ -659,34 +713,52 @@ export async function extractAdminQuizQuestions(
   for (const batch of batches) {
     onProgress(`Extracting pages ${batch[0].page_number}–${batch.at(-1)!.page_number}…`);
     try {
-      const response = await fetch("/api/extract-quiz-questions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${sessionData.session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ paper_id: paperId, images: batch }),
-      });
-      let data: { error?: unknown; questions?: unknown } | null = null;
-      try {
-        data = await response.json();
-      } catch {
-        data = null;
-      }
-      if (!response.ok) {
-        throw new Error(
-          typeof data?.error === "string" ? data.error : "Question extraction failed.",
+      let rateLimitRetries = 0;
+      while (true) {
+        const response = await fetch("/api/extract-quiz-questions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${sessionData.session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ paper_id: paperId, images: batch }),
+        });
+        let data: QuizExtractionResponse | null = null;
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+        if (response.status === 429) {
+          const retryAfterSeconds = getRetryAfterSeconds(response, data) ?? 5;
+          if (
+            rateLimitRetries === 0 &&
+            retryAfterSeconds <= MAX_AUTOMATIC_RATE_LIMIT_WAIT_SECONDS
+          ) {
+            rateLimitRetries += 1;
+            await waitForRateLimit(retryAfterSeconds, onProgress);
+            continue;
+          }
+          throw new Error(
+            `Groq is still rate-limited. Try again in ${formatRetryDelay(retryAfterSeconds)}.`,
+          );
+        }
+        if (!response.ok) {
+          throw new Error(
+            typeof data?.error === "string" ? data.error : "Question extraction failed.",
+          );
+        }
+        if (!Array.isArray(data?.questions)) {
+          throw new Error("The extraction service returned an invalid question list.");
+        }
+        questions.push(
+          ...(data.questions as ExtractedQuizQuestion[]).map((question) => ({
+            ...question,
+            source_page: question.source_page ?? (batch.length === 1 ? batch[0].page_number : null),
+          })),
         );
+        break;
       }
-      if (!Array.isArray(data?.questions)) {
-        throw new Error("The extraction service returned an invalid question list.");
-      }
-      questions.push(
-        ...(data.questions as ExtractedQuizQuestion[]).map((question) => ({
-          ...question,
-          source_page: question.source_page ?? (batch.length === 1 ? batch[0].page_number : null),
-        })),
-      );
     } catch (batchError) {
       if (!questions.length) throw batchError;
       return {

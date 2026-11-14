@@ -4405,7 +4405,7 @@ select {
   margin: 0;
 }
 
-.battle-challenge-panel > label,
+.battle-challenge-panel > label:not(.search-field),
 .quiz-question-editor > label,
 .quiz-answer-options > label {
   min-width: 0;

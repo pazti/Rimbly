@@ -23,6 +23,7 @@ import {
   QuizAttempt,
   QuizSet,
   University,
+  createAdminQuizRevision,
   createContribution,
   createSuggestion,
   getContributions,
@@ -670,6 +671,7 @@ function CourseCard({
       </span>
       <span className="course-copy">
         <span className="course-tags">
+          {course.department && <span className="badge">{course.department}</span>}
           <span className="badge badge-purple">{course.university}</span>
         </span>
         <strong>{course.code}</strong>
@@ -680,6 +682,105 @@ function CourseCard({
       </span>
       <span aria-hidden="true">›</span>
     </button>
+  );
+}
+
+const normalizeCatalogLabel = (value: string | null | undefined) =>
+  value?.trim().toLocaleLowerCase() ?? "";
+
+function studyRelevance(
+  department: string | null | undefined,
+  university: string | null | undefined,
+  profile: Profile | null,
+) {
+  const departmentMatch = Boolean(
+    normalizeCatalogLabel(department) &&
+    normalizeCatalogLabel(department) === normalizeCatalogLabel(profile?.department),
+  );
+  const universityMatch = Boolean(
+    normalizeCatalogLabel(university) &&
+    normalizeCatalogLabel(university) === normalizeCatalogLabel(profile?.university),
+  );
+  if (departmentMatch && universityMatch) return 0;
+  if (departmentMatch) return 1;
+  if (universityMatch) return 2;
+  return 3;
+}
+
+function sortCoursesForProfile(courses: Course[], profile: Profile | null) {
+  return [...courses].sort(
+    (first, second) =>
+      studyRelevance(first.department, first.university, profile) -
+        studyRelevance(second.department, second.university, profile) ||
+      first.university.localeCompare(second.university) ||
+      first.code.localeCompare(second.code),
+  );
+}
+
+function sortQuizSetsForProfile(quizzes: QuizSet[], profile: Profile | null) {
+  const priority = (quiz: QuizSet) => {
+    const departmentMatch = [quiz.audience_department, quiz.course_department].some(
+      (label) =>
+        normalizeCatalogLabel(label) &&
+        normalizeCatalogLabel(label) === normalizeCatalogLabel(profile?.department),
+    );
+    const universityMatch = [quiz.audience_university, quiz.university].some(
+      (label) =>
+        normalizeCatalogLabel(label) &&
+        normalizeCatalogLabel(label) === normalizeCatalogLabel(profile?.university),
+    );
+    if (departmentMatch && universityMatch) return 0;
+    if (departmentMatch) return 1;
+    if (universityMatch) return 2;
+    return 3;
+  };
+
+  return [...quizzes].sort(
+    (first, second) =>
+      priority(first) - priority(second) || second.created_at.localeCompare(first.created_at),
+  );
+}
+
+function QuizCatalogCard({
+  quiz,
+  busy,
+  onTake,
+  onReadSource,
+}: {
+  quiz: QuizSet;
+  busy: boolean;
+  onTake: () => void;
+  onReadSource: () => void;
+}) {
+  const departments = [
+    ...new Set([quiz.audience_department, quiz.course_department].filter(Boolean)),
+  ];
+  const universities = [...new Set([quiz.audience_university, quiz.university].filter(Boolean))];
+  const courseLabel = [quiz.course_code, quiz.course_title].filter(Boolean).join(" · ");
+
+  return (
+    <article className="quiz-catalog-card">
+      <div>
+        <h2>{quiz.title}</h2>
+        <p>{quiz.description || "Reviewed practice questions"}</p>
+        <small>
+          {courseLabel ? `Course: ${courseLabel} · ` : ""}
+          {quiz.question_count} questions
+        </small>
+        <small className="quiz-audience-meta">
+          Department: {departments.join(" / ") || "General"} · University:{" "}
+          {universities.join(" / ") || "All universities"}
+        </small>
+        {quiz.source_file_path && (
+          <button type="button" className="quiz-source-link" onClick={onReadSource}>
+            Read source in viewer: {quiz.source_file_name ?? "Source paper"}
+          </button>
+        )}
+      </div>
+      <Button disabled={busy} onClick={onTake}>
+        {busy ? "Loading…" : "Take quiz"}
+      </Button>
+    </article>
   );
 }
 
@@ -718,6 +819,7 @@ function App() {
     null,
   );
   const [publishedQuizSets, setPublishedQuizSets] = useState<QuizSet[]>([]);
+  const [publishedQuizSetsLoading, setPublishedQuizSetsLoading] = useState(true);
   const [activeQuizSetId, setActiveQuizSetId] = useState<string | null>(null);
   const [sourceToRead, setSourceToRead] = useState<{ path: string; title: string } | null>(null);
   const [leaderboardScope, setLeaderboardScope] = useState<"university" | "all">("university");
@@ -725,14 +827,13 @@ function App() {
   const user = session?.user ?? null;
   const selectedCourse = courses.find((course) => course.id === selectedCourseId) ?? null;
   const selectedPaper = papers.find((paper) => paper.id === selectedPaperId) ?? null;
-  const visibleCourses = useMemo(
-    () =>
-      courses.filter(
-        (course) =>
-          !profile?.university ||
-          course.university.toLowerCase() === profile.university.toLowerCase(),
-      ),
-    [courses, profile?.university],
+  const prioritizedCourses = useMemo(
+    () => sortCoursesForProfile(courses, profile),
+    [courses, profile],
+  );
+  const prioritizedQuizSets = useMemo(
+    () => sortQuizSetsForProfile(publishedQuizSets, profile),
+    [publishedQuizSets, profile],
   );
 
   const navigate = (next: Route) => {
@@ -894,8 +995,9 @@ function App() {
   }, [user?.id]);
 
   useEffect(() => {
-    if (!user || !["quiz-setup", "paper"].includes(route)) return;
+    if (!user || !["quiz-setup", "paper", "profile"].includes(route)) return;
     let active = true;
+    setPublishedQuizSetsLoading(true);
     void getPublishedQuizSets()
       .then((result) => {
         if (active) setPublishedQuizSets(result);
@@ -905,6 +1007,9 @@ function App() {
           setError(
             loadError instanceof Error ? loadError.message : "Could not load published quizzes.",
           );
+      })
+      .finally(() => {
+        if (active) setPublishedQuizSetsLoading(false);
       });
     return () => {
       active = false;
@@ -1681,9 +1786,9 @@ function App() {
               </div>
               <button onClick={() => navigate("practice")}>Browse all ›</button>
             </div>
-            {visibleCourses.length ? (
+            {prioritizedCourses.length ? (
               <div className="course-list">
-                {visibleCourses.slice(0, 4).map((course) => (
+                {prioritizedCourses.slice(0, 4).map((course) => (
                   <CourseCard
                     key={course.id}
                     course={course}
@@ -1759,9 +1864,8 @@ function App() {
       title = "Practice";
       content = (
         <PracticePage
-          courses={courses}
+          courses={prioritizedCourses}
           papers={papers}
-          coursesForUser={visibleCourses}
           onQuiz={() => navigate("quiz-setup")}
           onSelect={(course) => {
             setSelectedCourseId(course.id);
@@ -1876,47 +1980,31 @@ function App() {
               question before it goes live.
             </p>
           </div>
-          {publishedQuizSets.length ? (
+          {publishedQuizSetsLoading ? (
+            <p className="field-note" role="status">
+              Loading published quizzes…
+            </p>
+          ) : prioritizedQuizSets.length ? (
             <div className="course-list">
-              {publishedQuizSets.map((quiz) => (
-                <article className="quiz-catalog-card" key={quiz.id}>
-                  <div>
-                    <h2>{quiz.title}</h2>
-                    <p>{quiz.description || "Reviewed practice questions"}</p>
-                    <small>
-                      {quiz.course_code
-                        ? `${quiz.course_code} · ${quiz.university} · ${quiz.question_count} questions`
-                        : `Source-linked quiz · ${quiz.question_count} questions`}
-                    </small>
-                    <small className="quiz-audience-meta">
-                      Audience:{" "}
-                      {[quiz.target_university, quiz.target_department, quiz.target_level]
-                        .filter(Boolean)
-                        .join(" · ") || "All students"}
-                    </small>
-                    <button
-                      type="button"
-                      className="quiz-source-link"
-                      onClick={() =>
-                        setSourceToRead({
-                          path: quiz.source_file_path,
-                          title: `Original source: ${quiz.title}`,
-                        })
-                      }
-                    >
-                      Read source in viewer: {quiz.source_file_name}
-                    </button>
-                  </div>
-                  <Button disabled={busy} onClick={() => void startQuiz(quiz.id)}>
-                    {busy ? "Loading…" : "Take quiz"}
-                  </Button>
-                </article>
+              {prioritizedQuizSets.map((quiz) => (
+                <QuizCatalogCard
+                  key={quiz.id}
+                  quiz={quiz}
+                  busy={busy}
+                  onTake={() => void startQuiz(quiz.id)}
+                  onReadSource={() =>
+                    setSourceToRead({
+                      path: quiz.source_file_path!,
+                      title: `Original source: ${quiz.title}`,
+                    })
+                  }
+                />
               ))}
             </div>
           ) : (
             <EmptyState
               title="No published quizzes yet"
-              text="Admins are adding source-linked questions and reviewing each one. You can still read past papers in the library."
+              text="Admins are adding reviewed quiz sets. You can still read past papers in the library."
               action="Browse past questions"
               onAction={() => navigate("practice")}
             />
@@ -2143,6 +2231,44 @@ function App() {
                 text="Save a course from its page to keep it here."
                 action="Browse courses"
                 onAction={() => navigate("practice")}
+              />
+            )}
+          </section>
+          <section>
+            <div className="section-title">
+              <div>
+                <span>Available across departments and universities</span>
+                <h2>Published quizzes</h2>
+              </div>
+              <button onClick={() => navigate("quiz-setup")}>Browse all ›</button>
+            </div>
+            {publishedQuizSetsLoading ? (
+              <p className="field-note" role="status">
+                Loading published quizzes…
+              </p>
+            ) : prioritizedQuizSets.length ? (
+              <div className="course-list">
+                {prioritizedQuizSets.map((quiz) => (
+                  <QuizCatalogCard
+                    key={quiz.id}
+                    quiz={quiz}
+                    busy={busy}
+                    onTake={() => void startQuiz(quiz.id)}
+                    onReadSource={() =>
+                      setSourceToRead({
+                        path: quiz.source_file_path!,
+                        title: `Original source: ${quiz.title}`,
+                      })
+                    }
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="No published quizzes yet"
+                text="Published quizzes from every department will appear here."
+                action="Browse quizzes"
+                onAction={() => navigate("quiz-setup")}
               />
             )}
           </section>
@@ -3576,12 +3702,14 @@ function AdminQuizWorkspace({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [paperId, setPaperId] = useState("");
-  const [targetUniversity, setTargetUniversity] = useState("");
-  const [targetDepartment, setTargetDepartment] = useState("");
-  const [targetLevel, setTargetLevel] = useState("");
+  const [audienceUniversity, setAudienceUniversity] = useState("");
+  const [audienceDepartment, setAudienceDepartment] = useState("");
+  const [audienceLevel, setAudienceLevel] = useState("");
   const studyLevels = ["100 Level", "200 Level", "300 Level", "400 Level", "500 Level"];
   const [questions, setQuestions] = useState<DraftQuestion[]>([emptyQuestion()]);
   const [savedQuizId, setSavedQuizId] = useState<string | null>(null);
+  const [revisionParentId, setRevisionParentId] = useState<string | null>(null);
+  const [revisionSaved, setRevisionSaved] = useState(false);
   const [reviewingQuiz, setReviewingQuiz] = useState(false);
   const [reviewChangesSaved, setReviewChangesSaved] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -3608,9 +3736,9 @@ function AdminQuizWorkspace({
         title: String(values.get("title") ?? ""),
         description: String(values.get("description") ?? ""),
         paperId: paperId || null,
-        targetUniversity: String(values.get("target_university") ?? ""),
-        targetDepartment: String(values.get("target_department") ?? "").trim(),
-        targetLevel: String(values.get("target_level") ?? ""),
+        audienceUniversity: String(values.get("audience_university") ?? ""),
+        audienceDepartment: String(values.get("audience_department") ?? "").trim(),
+        audienceLevel: String(values.get("audience_level") ?? ""),
         questions: questions.map((question) => ({
           prompt: question.prompt,
           options: question.options,
@@ -3622,12 +3750,15 @@ function AdminQuizWorkspace({
         })),
       });
       setSavedQuizId(savedId);
+      setRevisionSaved(true);
       if (reviewingQuiz) setReviewChangesSaved(true);
       await onRefresh();
       setNotice(
         reviewingQuiz
           ? "Review edits saved. Only questions marked approved can be published."
-          : "Draft saved. It will not be visible to students until a different reviewer approves it.",
+          : revisionParentId
+            ? "Revision draft saved. The current published quiz stays available until another reviewer approves this revision."
+            : "Draft saved. It will not be visible to students until a different reviewer approves it.",
       );
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save this quiz draft.");
@@ -3637,6 +3768,10 @@ function AdminQuizWorkspace({
   };
 
   const requestReview = async (quizId: string) => {
+    if (quizId === savedQuizId && revisionParentId && !revisionSaved) {
+      setError("Save the revision changes before requesting review.");
+      return;
+    }
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -3648,16 +3783,20 @@ function AdminQuizWorkspace({
         setTitle("");
         setDescription("");
         setPaperId("");
-        setTargetUniversity("");
-        setTargetDepartment("");
-        setTargetLevel("");
+        setAudienceUniversity("");
+        setAudienceDepartment("");
+        setAudienceLevel("");
+        setRevisionParentId(null);
+        setRevisionSaved(false);
         setReviewingQuiz(false);
         setReviewChangesSaved(false);
         setQuestions([emptyQuestion()]);
         formRef.current?.reset();
       }
       setNotice(
-        "Submitted for human review. The quiz remains unpublished until a different reviewer approves it.",
+        revisionParentId
+          ? "Revision submitted for human review. The current published quiz stays available until another reviewer approves this revision."
+          : "Submitted for human review. The quiz remains unpublished until a different reviewer approves it.",
       );
     } catch (reviewError) {
       setError(
@@ -3683,15 +3822,17 @@ function AdminQuizWorkspace({
         setSavedQuizId(null);
         setReviewingQuiz(false);
         setReviewChangesSaved(false);
-        setTargetUniversity("");
-        setTargetDepartment("");
-        setTargetLevel("");
+        setAudienceUniversity("");
+        setAudienceDepartment("");
+        setAudienceLevel("");
         setQuestions([emptyQuestion()]);
         formRef.current?.reset();
       }
       setNotice(
         decision === "publish"
-          ? "Approved questions are now available for practice and battles."
+          ? revisionParentId
+            ? "Revision published. The previous quiz version is archived, and its attempt history is preserved."
+            : "Approved questions are now available for practice and battles."
           : "Returned to the quiz creator for revision.",
       );
     } catch (reviewError) {
@@ -3701,20 +3842,24 @@ function AdminQuizWorkspace({
     }
   };
 
-  const editDraft = async (quizId: string, forReview = false) => {
+  const editDraft = async (quizId: string, forReview = false, createRevision = false) => {
     setSaving(true);
     setError(null);
     try {
-      const draft = await getAdminQuizDraft(quizId);
+      const draftId = createRevision ? await createAdminQuizRevision(quizId) : quizId;
+      if (createRevision) await onRefresh();
+      const draft = await getAdminQuizDraft(draftId);
       setSavedQuizId(draft.id);
+      setRevisionParentId(draft.replaces_quiz_id ?? null);
+      setRevisionSaved(true);
       setReviewingQuiz(forReview);
       setReviewChangesSaved(!forReview);
       setTitle(draft.title);
       setDescription(draft.description);
       setPaperId(draft.paper_id ?? "");
-      setTargetUniversity(draft.target_university ?? "");
-      setTargetDepartment(draft.target_department ?? "");
-      setTargetLevel(draft.target_level ?? "");
+      setAudienceUniversity(draft.audience_university ?? "");
+      setAudienceDepartment(draft.audience_department ?? "");
+      setAudienceLevel(draft.audience_level ?? "");
       setQuestions(
         draft.questions.map((question) => ({
           ...question,
@@ -3726,8 +3871,10 @@ function AdminQuizWorkspace({
       );
       setNotice(
         forReview
-          ? "Review the original paper and each question. Save your decisions before publishing."
-          : "Draft loaded for editing.",
+          ? "Review each question and answer key, and check any attached source. Save your decisions before publishing."
+          : draft.replaces_quiz_id
+            ? "Edit this revision and request a separate review. The current published quiz stays available until the revision is approved."
+            : "Draft loaded for editing.",
       );
       formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (loadError) {
@@ -3739,6 +3886,7 @@ function AdminQuizWorkspace({
 
   const updateQuestion = (index: number, patch: Partial<DraftQuestion>) => {
     if (reviewingQuiz) setReviewChangesSaved(false);
+    if (revisionParentId) setRevisionSaved(false);
     setQuestions((current) =>
       current.map((question, questionIndex) =>
         questionIndex === index ? { ...question, ...patch } : question,
@@ -3835,6 +3983,7 @@ function AdminQuizWorkspace({
           current[0].options.every((option) => !option.trim());
         return replaceBlankStarter ? imported : [...current, ...imported];
       });
+      if (revisionParentId) setRevisionSaved(false);
       setAiQuestionJson("");
       setNotice(
         `${imported.length} AI suggestions added as pending questions. Check each against the original before saving.`,
@@ -3868,6 +4017,7 @@ function AdminQuizWorkspace({
           "Extraction would exceed the 100-question limit. Remove questions and retry.",
         );
       }
+      if (revisionParentId) setRevisionSaved(false);
       setQuestions((current) => [
         ...current,
         ...extracted.map((question) => ({
@@ -3902,25 +4052,31 @@ function AdminQuizWorkspace({
             <span className="eyebrow">
               {reviewingQuiz
                 ? "Human question review"
-                : canManage
-                  ? "Quiz authoring"
-                  : "Review queue"}
+                : revisionParentId
+                  ? "Published quiz revision"
+                  : canManage
+                    ? "Quiz authoring"
+                    : "Review queue"}
             </span>
             <h2>
               {reviewingQuiz
-                ? "Review questions against the original"
-                : canManage
-                  ? "Create a question set"
-                  : "Pending question sets"}
+                ? "Review questions and attached sources"
+                : revisionParentId
+                  ? "Edit published quiz"
+                  : canManage
+                    ? "Create a question set"
+                    : "Pending question sets"}
             </h2>
           </div>
           <span>{quizzes.length} quizzes</span>
         </div>
         {(canManage || (canReview && reviewingQuiz)) && (
           <p className="admin-quiz-guidance">
-            Upload and publish the PDF in <strong>Past questions</strong> first, then select it as
-            the source paper here. AI creates suggestions only; questions stay pending until a
-            different reviewer verifies them against the original.
+            A source paper is optional. Link one to review against an original PDF or use
+            Groq&apos;s page extraction; otherwise create questions manually or paste AI-generated
+            JSON. Each quiz still goes through a separate human review before publishing.
+            {revisionParentId &&
+              " The currently published version remains available until another reviewer approves this revision."}
           </p>
         )}
         {canManage && !reviewingQuiz && (
@@ -3935,9 +4091,8 @@ function AdminQuizWorkspace({
               </Button>
             </div>
             <p>
-              Upload the PDF under <strong>Past questions</strong>, then choose it below and use
-              <strong> Extract questions (AI assist)</strong>. Or copy this prompt into your own AI
-              tool with the PDF attached.
+              For Groq page extraction, upload a PDF under <strong>Past questions</strong> and
+              select it below. Source papers are optional for manual quizzes and pasted AI JSON.
             </p>
             <details>
               <summary>View the reusable AI prompt</summary>
@@ -3980,7 +4135,14 @@ function AdminQuizWorkspace({
           </p>
         )}
         {(canManage || (canReview && reviewingQuiz)) && (
-          <form ref={formRef} className="admin-form" onSubmit={(event) => void saveDraft(event)}>
+          <form
+            ref={formRef}
+            className="admin-form"
+            onChange={() => {
+              if (revisionParentId) setRevisionSaved(false);
+            }}
+            onSubmit={(event) => void saveDraft(event)}
+          >
             <label>
               <span>Quiz title</span>
               <input
@@ -4003,20 +4165,19 @@ function AdminQuizWorkspace({
               />
             </label>
             <fieldset className="quiz-audience-targeting">
-              <legend>Student audience</legend>
+              <legend>Audience labels</legend>
               <p className="field-note">
-                Leave a field blank to make it unrestricted. Department and year match the
-                student&apos;s saved profile.
+                These labels are informational only and never restrict who can view or take a quiz.
               </p>
               <div className="quiz-audience-fields">
                 <label>
-                  <span>University</span>
+                  <span>University label</span>
                   <select
-                    name="target_university"
-                    value={targetUniversity}
-                    onChange={(event) => setTargetUniversity(event.target.value)}
+                    name="audience_university"
+                    value={audienceUniversity}
+                    onChange={(event) => setAudienceUniversity(event.target.value)}
                   >
-                    <option value="">All universities</option>
+                    <option value="">No university label</option>
                     {universities.map((university) => (
                       <option key={university.id} value={university.name}>
                         {university.name}
@@ -4025,23 +4186,23 @@ function AdminQuizWorkspace({
                   </select>
                 </label>
                 <label>
-                  <span>Department (optional)</span>
+                  <span>Department label (optional)</span>
                   <input
-                    name="target_department"
+                    name="audience_department"
                     maxLength={120}
-                    value={targetDepartment}
-                    onChange={(event) => setTargetDepartment(event.target.value)}
-                    placeholder="Any department"
+                    value={audienceDepartment}
+                    onChange={(event) => setAudienceDepartment(event.target.value)}
+                    placeholder="Department name"
                   />
                 </label>
                 <label>
-                  <span>Year of study (optional)</span>
+                  <span>Year / level label (optional)</span>
                   <select
-                    name="target_level"
-                    value={targetLevel}
-                    onChange={(event) => setTargetLevel(event.target.value)}
+                    name="audience_level"
+                    value={audienceLevel}
+                    onChange={(event) => setAudienceLevel(event.target.value)}
                   >
-                    <option value="">All years</option>
+                    <option value="">No year label</option>
                     {studyLevels.map((level) => (
                       <option key={level} value={level}>
                         {level}
@@ -4052,20 +4213,23 @@ function AdminQuizWorkspace({
               </div>
             </fieldset>
             <label>
-              <span>Source paper</span>
+              <span>Reference paper (optional)</span>
               <select
-                required
                 value={paperId}
-                disabled={Boolean(savedQuizId)}
+                disabled={Boolean(savedQuizId && paperId)}
                 onChange={(event) => setPaperId(event.target.value)}
               >
-                <option value="">Select an approved source paper</option>
+                <option value="">No source paper</option>
                 {papers.map((paper) => (
                   <option key={paper.id} value={paper.id}>
                     {paper.university} · {paper.course_code} · {paper.academic_session}
                   </option>
                 ))}
               </select>
+              <small className="field-note">
+                Optional. You can add a paper later, but once linked it cannot be changed. A source
+                enables the original viewer and Groq page extraction.
+              </small>
             </label>
             {selectedPaper && (
               <div className="admin-actions">
@@ -4113,6 +4277,7 @@ function AdminQuizWorkspace({
                     className="quiz-remove-question"
                     onClick={() => {
                       if (reviewingQuiz) setReviewChangesSaved(false);
+                      if (revisionParentId) setRevisionSaved(false);
                       setQuestions((current) =>
                         current.filter((_, index) => index !== questionIndex),
                       );
@@ -4267,6 +4432,7 @@ function AdminQuizWorkspace({
                 disabled={saving || questions.length >= 100}
                 onClick={() => {
                   if (reviewingQuiz) setReviewChangesSaved(false);
+                  if (revisionParentId) setRevisionSaved(false);
                   setQuestions((current) => [...current, emptyQuestion()]);
                 }}
               >
@@ -4277,9 +4443,11 @@ function AdminQuizWorkspace({
                   ? "Saving…"
                   : reviewingQuiz
                     ? "Save review decisions"
-                    : savedQuizId
-                      ? "Save draft changes"
-                      : "Save quiz draft"}
+                    : revisionParentId
+                      ? "Save revision draft"
+                      : savedQuizId
+                        ? "Save draft changes"
+                        : "Save quiz draft"}
               </Button>
               {reviewingQuiz && savedQuizId && (
                 <>
@@ -4319,13 +4487,18 @@ function AdminQuizWorkspace({
                   {quiz.paper_id
                     ? (papers.find((paper) => paper.id === quiz.paper_id)?.course_code ??
                       "Linked past paper")
-                    : "Standalone source"}{" "}
-                  · {quiz.question_count} questions · Audience:{" "}
-                  {[quiz.target_university, quiz.target_department, quiz.target_level]
+                    : "No source paper"}{" "}
+                  · {quiz.question_count} questions · Labels:{" "}
+                  {[quiz.audience_university, quiz.audience_department, quiz.audience_level]
                     .filter(Boolean)
-                    .join(" · ") || "All students"}{" "}
+                    .join(" · ") || "No audience labels"}{" "}
                   · Created by {quiz.creator_name}
                 </small>
+                {quiz.replaces_quiz_id && (
+                  <small className="field-note">
+                    Revision draft. The current published version remains available until approval.
+                  </small>
+                )}
               </div>
               {quiz.paper_id && papers.some((paper) => paper.id === quiz.paper_id) && (
                 <Button
@@ -4355,15 +4528,39 @@ function AdminQuizWorkspace({
                   <>
                     <Button
                       variant="secondary"
-                      disabled={saving}
+                      disabled={saving || quiz.id === savedQuizId}
                       onClick={() => void editDraft(quiz.id)}
                     >
-                      Edit draft
+                      {quiz.replaces_quiz_id ? "Edit revision" : "Edit draft"}
                     </Button>
-                    <Button disabled={saving} onClick={() => void requestReview(quiz.id)}>
-                      Request review
+                    <Button
+                      disabled={
+                        saving ||
+                        (quiz.id === savedQuizId &&
+                          Boolean(quiz.replaces_quiz_id) &&
+                          !revisionSaved)
+                      }
+                      onClick={() => void requestReview(quiz.id)}
+                    >
+                      {quiz.replaces_quiz_id ? "Request revision review" : "Request review"}
                     </Button>
                   </>
+                )}
+              {canManage &&
+                quiz.created_by === userId &&
+                quiz.status === "published" &&
+                !quizzes.some(
+                  (revision) =>
+                    revision.replaces_quiz_id === quiz.id &&
+                    ["draft", "needs_revision", "pending_review"].includes(revision.status),
+                ) && (
+                  <Button
+                    variant="secondary"
+                    disabled={saving}
+                    onClick={() => void editDraft(quiz.id, false, true)}
+                  >
+                    Edit quiz
+                  </Button>
                 )}
               {canReview && quiz.created_by !== userId && quiz.status === "pending_review" && (
                 <Button disabled={saving} onClick={() => void editDraft(quiz.id, true)}>
@@ -4375,7 +4572,7 @@ function AdminQuizWorkspace({
         ) : (
           <EmptyState
             title="No quiz sets yet"
-            text="Create a source-linked question set. It stays unpublished until another reviewer approves questions."
+            text="Create a question set with or without a source paper. It stays unpublished until another reviewer approves its questions."
           />
         )}
       </section>
@@ -4394,22 +4591,19 @@ function AdminQuizWorkspace({
 function PracticePage({
   courses,
   papers,
-  coursesForUser,
   onQuiz,
   onSelect,
   onNavigate,
 }: {
   courses: Course[];
   papers: Paper[];
-  coursesForUser: Course[];
   onQuiz: () => void;
   onSelect: (course: Course) => void;
   onNavigate: (route: Route) => void;
 }) {
   const [search, setSearch] = useState("");
-  const [allUniversities, setAllUniversities] = useState(false);
-  const displayed = (allUniversities ? courses : coursesForUser).filter((course) =>
-    `${course.code} ${course.title} ${course.university}`
+  const displayed = courses.filter((course) =>
+    `${course.code} ${course.title} ${course.department ?? ""} ${course.university}`
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
@@ -4417,30 +4611,19 @@ function PracticePage({
     <>
       <div className="page-head">
         <span className="eyebrow">Past questions library</span>
-        <h1>Practice with published papers.</h1>
-        <p>Browse courses and past papers from the study library.</p>
+        <h1>Practice with the whole library.</h1>
+        <p>
+          Courses from every department and university are included, with your study profile matches
+          first.
+        </p>
         <Button onClick={onQuiz}>Take a published quiz</Button>
-      </div>
-      <div className="segment">
-        <button
-          className={!allUniversities ? "active" : ""}
-          onClick={() => setAllUniversities(false)}
-        >
-          My university
-        </button>
-        <button
-          className={allUniversities ? "active" : ""}
-          onClick={() => setAllUniversities(true)}
-        >
-          All universities
-        </button>
       </div>
       <label className="search-field">
         <span aria-hidden="true">⌕</span>
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search course code, title, or university"
+          placeholder="Search course code, title, department, or university"
         />
       </label>
       <section>
@@ -4449,7 +4632,7 @@ function PracticePage({
             <span>
               {displayed.length} {displayed.length === 1 ? "course" : "courses"}
             </span>
-            <h2>{allUniversities ? "All universities" : "Your university"}</h2>
+            <h2>All departments and universities</h2>
           </div>
         </div>
         {displayed.length ? (
@@ -4468,11 +4651,11 @@ function PracticePage({
             title={courses.length ? "No matching courses" : "The library is empty"}
             text={
               courses.length
-                ? "Try a different search or show all universities."
+                ? "Try a different search term."
                 : "Ask an administrator to add courses to the study library."
             }
-            action={courses.length ? "Show all universities" : "Contribute a paper"}
-            onAction={() => (courses.length ? setAllUniversities(true) : onNavigate("contribute"))}
+            action={courses.length ? "Clear search" : "Contribute a paper"}
+            onAction={() => (courses.length ? setSearch("") : onNavigate("contribute"))}
           />
         )}
       </section>
@@ -4722,8 +4905,10 @@ function BattlePage({
           </select>
         </label>
         <label className="search-field">
+          <span className="sr-only">Find a player at your university</span>
           <span aria-hidden="true">⌕</span>
           <input
+            type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Find a player at your university"
