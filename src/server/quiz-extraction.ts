@@ -46,11 +46,19 @@ const responseSchema = {
   additionalProperties: false,
 };
 
-const jsonResponse = (body: unknown, status = 200) =>
+const jsonResponse = (body: unknown, status = 200, responseHeaders: Record<string, string> = {}) =>
   Response.json(body, {
     status,
-    headers: { "Cache-Control": "no-store" },
+    headers: { "Cache-Control": "no-store", ...responseHeaders },
   });
+
+const parseRetryAfterSeconds = (value: string | null) => {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.max(1, Math.ceil(seconds));
+  const retryAt = Date.parse(value);
+  return Number.isNaN(retryAt) ? null : Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+};
 
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -84,7 +92,10 @@ export async function handleQuizExtraction(
     return jsonResponse({ error: "Choose an approved source paper to extract." }, 400);
   }
   if (!Array.isArray(body.images) || body.images.length < 1 || body.images.length > 3) {
-    return jsonResponse({ error: "Send one to three rendered source pages per extraction request." }, 400);
+    return jsonResponse(
+      { error: "Send one to three rendered source pages per extraction request." },
+      400,
+    );
   }
 
   let totalEncodedSize = 0;
@@ -106,7 +117,10 @@ export async function handleQuizExtraction(
   });
 
   if (images.length !== body.images.length || totalEncodedSize > MAX_BATCH_SIZE) {
-    return jsonResponse({ error: "Rendered source pages are invalid or too large to extract." }, 413);
+    return jsonResponse(
+      { error: "Rendered source pages are invalid or too large to extract." },
+      413,
+    );
   }
 
   const userClient = createClient(supabaseUrl, anonKey, {
@@ -123,7 +137,8 @@ export async function handleQuizExtraction(
     return jsonResponse({ error: "Quiz management permission is required." }, 403);
   }
 
-  const { data: approvedPapers, error: papersError } = await userClient.rpc("admin_list_quiz_papers");
+  const { data: approvedPapers, error: papersError } =
+    await userClient.rpc("admin_list_quiz_papers");
   if (papersError) {
     return jsonResponse({ error: "Could not verify the approved source paper." }, 500);
   }
@@ -169,13 +184,21 @@ export async function handleQuizExtraction(
 
   if (!providerResponse.ok) {
     if (providerResponse.status === 429) {
+      const retryAfter = providerResponse.headers.get("retry-after");
       return jsonResponse(
-        { error: "Groq's rate limit was reached. Wait briefly, then retry extraction." },
+        {
+          error: "Groq temporarily rate-limited this extraction.",
+          retry_after_seconds: parseRetryAfterSeconds(retryAfter),
+        },
         429,
+        retryAfter ? { "Retry-After": retryAfter } : {},
       );
     }
     console.error("Question extraction provider returned an error.", providerResponse.status);
-    return jsonResponse({ error: "Question extraction failed. Try again or enter questions manually." }, 502);
+    return jsonResponse(
+      { error: "Question extraction failed. Try again or enter questions manually." },
+      502,
+    );
   }
 
   let result: { choices?: Array<{ message?: { content?: unknown } }> };
@@ -187,19 +210,28 @@ export async function handleQuizExtraction(
 
   const outputText = result.choices?.[0]?.message?.content;
   if (typeof outputText !== "string") {
-    return jsonResponse({ error: "The extraction provider returned no structured questions." }, 502);
+    return jsonResponse(
+      { error: "The extraction provider returned no structured questions." },
+      502,
+    );
   }
 
   let extracted: unknown;
   try {
     extracted = JSON.parse(outputText);
   } catch {
-    return jsonResponse({ error: "The extraction provider returned invalid structured data." }, 502);
+    return jsonResponse(
+      { error: "The extraction provider returned invalid structured data." },
+      502,
+    );
   }
 
   const candidates = (extracted as { questions?: unknown })?.questions;
   if (!Array.isArray(candidates)) {
-    return jsonResponse({ error: "The extraction provider returned an invalid question list." }, 502);
+    return jsonResponse(
+      { error: "The extraction provider returned an invalid question list." },
+      502,
+    );
   }
 
   const questions = candidates.slice(0, 100).flatMap((item) => {
