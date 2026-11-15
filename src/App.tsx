@@ -45,6 +45,7 @@ import {
   deleteAdminPaper,
   inviteAdmin,
   publishAdminPaper,
+  publishAdminQuiz,
   saveAdminQuizDraft,
   requestAdminQuizReview,
   reviewAdminQuiz,
@@ -3785,6 +3786,13 @@ function AdminQuizWorkspace({
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     const submitForReview =
       submitter instanceof HTMLButtonElement && submitter.value === "request_review";
+    const publishImmediately =
+      submitter instanceof HTMLButtonElement && submitter.value === "publish_quiz";
+    const publishConfirmation = revisionParentId
+      ? "Publish this revision now? This skips the second-reviewer step and archives the previous version. Confirm that you have checked every question, answer, and explanation."
+      : "Publish this quiz now? This skips the second-reviewer step. Confirm that you have checked every question, answer, and explanation.";
+    if (publishImmediately && !window.confirm(publishConfirmation)) return;
+
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -3830,8 +3838,30 @@ function AdminQuizWorkspace({
         form.reset();
         setNotice(
           isRevision
-            ? "Revision submitted for review. The current published quiz stays available until another reviewer approves it."
+            ? "Revision submitted for review. The current published quiz stays available until a reviewer publishes the revision."
             : "Submitted for human review. A different reviewer must approve it before students can see it.",
+        );
+      } else if (publishImmediately) {
+        await publishAdminQuiz(savedId);
+        await onRefresh();
+        const isRevision = Boolean(revisionParentId);
+        setSavedQuizId(null);
+        setTitle("");
+        setDescription("");
+        setPaperId("");
+        setAudienceUniversity("");
+        setAudienceDepartment("");
+        setAudienceLevel("");
+        setRevisionParentId(null);
+        setRevisionSaved(false);
+        setReviewingQuiz(false);
+        setReviewChangesSaved(false);
+        setQuestions([emptyQuestion()]);
+        form.reset();
+        setNotice(
+          isRevision
+            ? "Quiz revision published. The previous version was archived and its history preserved."
+            : "Quiz published and available to students across departments and universities.",
         );
       } else {
         await onRefresh();
@@ -3839,8 +3869,8 @@ function AdminQuizWorkspace({
           reviewingQuiz
             ? "Review edits saved. Only questions marked approved can be published."
             : revisionParentId
-              ? "Revision draft saved. The current published quiz stays available until another reviewer approves this revision."
-              : "Draft saved. It will not be visible to students until a different reviewer approves it.",
+              ? "Revision draft saved. The current published quiz stays available until you publish this revision or a reviewer approves it."
+              : "Draft saved. It will not be visible to students until you request publication.",
         );
       }
     } catch (saveError) {
@@ -3849,7 +3879,9 @@ function AdminQuizWorkspace({
           ? saveError.message
           : submitForReview
             ? "Could not save and submit this quiz for review."
-            : "Could not save this quiz draft.",
+            : publishImmediately
+              ? "Could not publish this quiz. Check that every question has a correct answer."
+              : "Could not save this quiz draft.",
       );
     } finally {
       setSaving(false);
@@ -3962,7 +3994,7 @@ function AdminQuizWorkspace({
         forReview
           ? "Review each question and answer key, and check any attached source. Save your decisions before publishing."
           : draft.replaces_quiz_id
-            ? "Edit this revision and request a separate review. The current published quiz stays available until the revision is approved."
+            ? "Edit this revision, then publish it yourself or send it for a separate review. The current version stays live until the revision is published."
             : "Draft loaded for editing.",
       );
       formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -4197,10 +4229,9 @@ function AdminQuizWorkspace({
           <p className="admin-quiz-guidance">
             A source paper is optional. Link one to review against an original PDF or use
             Groq&apos;s page extraction; otherwise create questions manually or paste AI-generated
-            JSON. Saving alone leaves a draft. Use “Save and request review” to send it to a
-            different reviewer before students can see it.
-            {revisionParentId &&
-              " The currently published version remains available until another reviewer approves this revision."}
+            JSON. Saving alone leaves a draft. Use “Save and request review” for another reviewer,
+            or use “Publish quiz” after confirming the question and answer key yourself.
+            {revisionParentId && " Publishing this revision archives the previous version."}
           </p>
         )}
         {canManage && !reviewingQuiz && (
@@ -4562,7 +4593,7 @@ function AdminQuizWorkspace({
               >
                 Add question
               </Button>
-              <Button type="submit" disabled={saving}>
+              <Button type="submit" variant="secondary" disabled={saving}>
                 {saving
                   ? "Saving…"
                   : reviewingQuiz
@@ -4574,15 +4605,20 @@ function AdminQuizWorkspace({
                         : "Save quiz draft"}
               </Button>
               {canManage && !reviewingQuiz && (
-                <Button
-                  type="submit"
-                  variant="secondary"
-                  name="submit_action"
-                  value="request_review"
-                  disabled={saving}
-                >
-                  {saving ? "Submitting…" : "Save and request review"}
-                </Button>
+                <>
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    name="submit_action"
+                    value="request_review"
+                    disabled={saving}
+                  >
+                    {saving ? "Submitting…" : "Save and request review"}
+                  </Button>
+                  <Button type="submit" name="submit_action" value="publish_quiz" disabled={saving}>
+                    {saving ? "Publishing…" : "Publish quiz"}
+                  </Button>
+                </>
               )}
               {reviewingQuiz && savedQuizId && (
                 <>
@@ -4631,7 +4667,8 @@ function AdminQuizWorkspace({
                 </small>
                 {quiz.replaces_quiz_id && (
                   <small className="field-note">
-                    Revision draft. The current published version remains available until approval.
+                    Revision draft. The current version remains available until this revision is
+                    published.
                   </small>
                 )}
               </div>
@@ -4716,7 +4753,7 @@ function AdminQuizWorkspace({
         ) : (
           <EmptyState
             title="No quiz sets yet"
-            text="Create a question set with or without a source paper. It stays unpublished until another reviewer approves its questions."
+            text="Create a question set with or without a source paper. Save and request review, or publish it yourself after checking every answer."
           />
         )}
       </section>

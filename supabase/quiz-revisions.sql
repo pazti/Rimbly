@@ -5,7 +5,7 @@ alter table public.quiz_sets
   add column if not exists replaces_quiz_id uuid references public.quiz_sets(id) on delete restrict;
 
 comment on column public.quiz_sets.replaces_quiz_id is
-  'Published quiz revision that this draft replaces after a separate reviewer approves it.';
+  'Published quiz revision that this draft replaces after a reviewer approves or its creator self-publishes it.';
 
 create index if not exists quiz_sets_replaces_quiz_idx
   on public.quiz_sets (replaces_quiz_id)
@@ -201,14 +201,11 @@ begin
     quiz_id, paper_id, position, prompt, options, correct_index, explanation,
     review_status, source_page, source_note
   )
-  select revision_id, question.paper_id, question.position, question.prompt,
-    question.options, question.correct_index, question.explanation, 'approved',
+  select revision_id, source_quiz.paper_id, question.position, question.prompt,
+    question.options, question.correct_index, question.explanation, 'pending',
     question.source_page, question.source_note
   from public.quiz_set_questions question
   where question.quiz_id = source_quiz.id
-    and question.paper_id is not distinct from source_quiz.paper_id
-    and question.review_status = 'approved'
-    and question.correct_index is not null
   order by question.position;
 
   insert into public.admin_audit_logs (actor_id, action, resource_type, resource_id, details)
@@ -218,6 +215,91 @@ begin
   );
 
   return revision_id;
+end;
+$$;
+
+create or replace function public.admin_publish_quiz(p_quiz_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  target_quiz public.quiz_sets%rowtype;
+  question_count integer;
+begin
+  if auth.uid() is null
+     or public.current_user_is_suspended()
+     or not public.has_admin_permission('quiz.manage') then
+    raise exception 'Quiz management permission is required' using errcode = '42501';
+  end if;
+
+  select * into target_quiz
+  from public.quiz_sets quiz
+  where quiz.id = p_quiz_id
+    and quiz.created_by = auth.uid()
+    and quiz.status in ('draft', 'needs_revision')
+  for update;
+  if not found then
+    raise exception 'Only the creator can publish an editable quiz';
+  end if;
+
+  if target_quiz.paper_id is not null and not exists (
+    select 1 from public.papers paper
+    where paper.id = target_quiz.paper_id and paper.status = 'approved'
+  ) then
+    raise exception 'The linked source paper is no longer approved';
+  end if;
+
+  select count(*) into question_count
+  from public.quiz_set_questions question
+  where question.quiz_id = target_quiz.id;
+  if question_count = 0 then
+    raise exception 'Add at least one question before publishing';
+  end if;
+  if exists (
+    select 1 from public.quiz_set_questions question
+    where question.quiz_id = target_quiz.id
+      and question.paper_id is distinct from target_quiz.paper_id
+  ) then
+    raise exception 'Save the quiz questions again before publishing';
+  end if;
+  if exists (
+    select 1 from public.quiz_set_questions question
+    where question.quiz_id = target_quiz.id
+      and question.correct_index is null
+  ) then
+    raise exception 'Select a correct answer for every question before publishing';
+  end if;
+  if target_quiz.replaces_quiz_id is not null and not exists (
+    select 1 from public.quiz_sets original
+    where original.id = target_quiz.replaces_quiz_id and original.status = 'published'
+  ) then
+    raise exception 'The original quiz is no longer published; refresh the quiz list';
+  end if;
+
+  update public.quiz_set_questions
+  set review_status = 'approved'
+  where quiz_id = target_quiz.id;
+
+  update public.quiz_sets
+  set status = 'published', reviewed_by = auth.uid(), reviewed_at = now(), updated_at = now()
+  where id = target_quiz.id;
+
+  if target_quiz.replaces_quiz_id is not null then
+    update public.quiz_sets
+    set status = 'archived', updated_at = now()
+    where id = target_quiz.replaces_quiz_id and status = 'published';
+    if not found then
+      raise exception 'The original quiz could not be archived; the revision was not published';
+    end if;
+  end if;
+
+  insert into public.admin_audit_logs (actor_id, action, resource_type, resource_id, details)
+  values (
+    auth.uid(), 'quiz.self_published', 'quiz', target_quiz.id::text,
+    jsonb_build_object('replaces_quiz_id', target_quiz.replaces_quiz_id)
+  );
 end;
 $$;
 
@@ -351,12 +433,14 @@ revoke all on function public.get_published_quiz_sets_for_current_user() from pu
 revoke all on function public.admin_list_quiz_sets_with_audience() from public, anon;
 revoke all on function public.admin_get_quiz_draft_with_audience(uuid) from public, anon;
 revoke all on function public.admin_create_quiz_revision(uuid) from public, anon;
+revoke all on function public.admin_publish_quiz(uuid) from public, anon;
 revoke all on function public.admin_archive_quiz_set(uuid) from public, anon;
 
 grant execute on function public.get_published_quiz_sets_for_current_user() to authenticated;
 grant execute on function public.admin_list_quiz_sets_with_audience() to authenticated;
 grant execute on function public.admin_get_quiz_draft_with_audience(uuid) to authenticated;
 grant execute on function public.admin_create_quiz_revision(uuid) to authenticated;
+grant execute on function public.admin_publish_quiz(uuid) to authenticated;
 grant execute on function public.admin_archive_quiz_set(uuid) to authenticated;
 
 commit;

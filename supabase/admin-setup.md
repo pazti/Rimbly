@@ -15,11 +15,11 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
 5. Apply `quiz-audience-targeting.sql`, then `quiz-revisions.sql`, through the
    project's authorized Supabase migration workflow. These add optional university,
    department, and year-of-study labels without restricting access; allow paperless
-   quizzes; add course-department discovery labels; and preserve the current published
-   quiz while a revised copy goes through separate review. Delete archives the quiz
-   and its revision family so attempts and battles are retained. The app changes are
-   prepared in the repository,
-   but both migrations must be applied before the live database supports these changes.
+   quizzes; add course-department discovery labels; allow creator self-publishing;
+   preserve the current published quiz while a revision is edited; and provide a safe
+   delete action that archives quizzes without removing attempts or battles. These app
+   changes are prepared in the repository, but both migrations must be applied before
+   the live database supports them.
 6. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate.
 7. Deploy the two Supabase Edge Functions from the repository root:
@@ -67,15 +67,17 @@ server-only `GROQ_API_KEY` Vercel variable. PDF pages are rendered in the browse
 and up to 60 pages are processed in payload-sized batches to respect Vercel and
 Groq limits. On a short 429 rate limit, the app waits for Groq's `Retry-After`
 window and retries that page batch once; longer resets are shown so the admin can
-retry later. Extraction only creates editable pending suggestions. A different
-authorized reviewer must inspect the original document, edit questions as needed,
-and approve individual questions before approved items can appear in quizzes or
-battles. Missing/uncertain answer keys are left unset for a moderator to resolve.
+retry later. Extraction and pasted JSON create editable pending suggestions. The
+creator can request a different reviewer or self-publish after checking every
+question, option, and answer key. Self-publishing requires a correct answer for every
+question and is recorded in the audit log. Missing/uncertain answer keys are left
+unset until a moderator or quiz creator resolves them.
 
-After publication, the quiz creator can start a revision, add or remove questions,
-and update its metadata. The current version remains available until a different
-authorized reviewer approves the revision; publishing the revision archives the
-prior version without deleting its attempts or battle history.
+After publication, the creator can start a revision, add or remove questions, and
+update metadata. The current version remains available until the revision is
+published. A reviewer can approve it, or the creator can self-publish after checking
+the complete set; publishing archives the prior version without deleting attempts
+or battle history.
 
 The original PDF/image remains stored as the source of truth and is displayed in
 the in-app viewer with a light account watermark and no download control. This

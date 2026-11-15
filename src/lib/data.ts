@@ -479,6 +479,20 @@ export async function createAdminQuizRevision(quizId: string) {
   return data as string;
 }
 
+export async function publishAdminQuiz(quizId: string) {
+  const { error } = await requireSupabase().rpc("admin_publish_quiz", {
+    p_quiz_id: quizId,
+  });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Direct quiz publishing is not installed yet. Apply supabase/quiz-revisions.sql through the project's authorized migration workflow.",
+      );
+    }
+    throw error;
+  }
+}
+
 export async function archiveAdminQuizSet(quizId: string) {
   const { error } = await requireSupabase().rpc("admin_archive_quiz_set", {
     p_quiz_id: quizId,
