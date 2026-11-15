@@ -16,8 +16,9 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    project's authorized Supabase migration workflow. These add optional university,
    department, and year-of-study labels without restricting access; allow paperless
    quizzes; add course-department discovery labels; and preserve the current published
-   quiz while a revised copy goes through separate review. Attempts and battles remain
-   attached to their original version. The app changes are prepared in the repository,
+   quiz while a revised copy goes through separate review. Delete archives the quiz
+   and its revision family so attempts and battles are retained. The app changes are
+   prepared in the repository,
    but both migrations must be applied before the live database supports these changes.
 6. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate.

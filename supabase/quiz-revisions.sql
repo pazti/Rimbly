@@ -107,6 +107,7 @@ begin
       quiz.audience_level, quiz.replaces_quiz_id
     from public.quiz_sets quiz
     left join public.profiles profile on profile.id = quiz.created_by
+    where quiz.status <> 'archived'
     order by quiz.created_at desc
     limit 200;
 end;
@@ -220,6 +221,51 @@ begin
 end;
 $$;
 
+create or replace function public.admin_archive_quiz_set(p_quiz_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  target_quiz public.quiz_sets%rowtype;
+begin
+  if auth.uid() is null
+     or public.current_user_is_suspended()
+     or not public.has_admin_permission('quiz.manage') then
+    raise exception 'Quiz management permission is required' using errcode = '42501';
+  end if;
+
+  select * into target_quiz
+  from public.quiz_sets quiz
+  where quiz.id = p_quiz_id
+    and quiz.created_by = auth.uid()
+    and quiz.status <> 'archived'
+  for update;
+  if not found then
+    raise exception 'Only the creator can delete an active quiz';
+  end if;
+
+  with recursive quiz_family(id) as (
+    select target_quiz.id
+    union all
+    select child.id
+    from public.quiz_sets child
+    join quiz_family parent on child.replaces_quiz_id = parent.id
+  )
+  update public.quiz_sets quiz
+  set status = 'archived', updated_at = now()
+  where quiz.id in (select id from quiz_family)
+    and quiz.status <> 'archived';
+
+  insert into public.admin_audit_logs (actor_id, action, resource_type, resource_id, details)
+  values (
+    auth.uid(), 'quiz.archived', 'quiz', p_quiz_id::text,
+    jsonb_build_object('preserved_attempts_and_battles', true)
+  );
+end;
+$$;
+
 create or replace function public.admin_review_quiz_set(p_quiz_id uuid, p_decision text)
 returns void
 language plpgsql
@@ -305,10 +351,12 @@ revoke all on function public.get_published_quiz_sets_for_current_user() from pu
 revoke all on function public.admin_list_quiz_sets_with_audience() from public, anon;
 revoke all on function public.admin_get_quiz_draft_with_audience(uuid) from public, anon;
 revoke all on function public.admin_create_quiz_revision(uuid) from public, anon;
+revoke all on function public.admin_archive_quiz_set(uuid) from public, anon;
 
 grant execute on function public.get_published_quiz_sets_for_current_user() to authenticated;
 grant execute on function public.admin_list_quiz_sets_with_audience() to authenticated;
 grant execute on function public.admin_get_quiz_draft_with_audience(uuid) to authenticated;
 grant execute on function public.admin_create_quiz_revision(uuid) to authenticated;
+grant execute on function public.admin_archive_quiz_set(uuid) to authenticated;
 
 commit;

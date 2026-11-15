@@ -5,6 +5,7 @@ import {
   AdminAccess,
   AdminAuditLog,
   AdminContribution,
+  archiveAdminQuizSet,
   AdminQuizPaper,
   AdminQuizSet,
   AdminPaper,
@@ -3972,6 +3973,40 @@ function AdminQuizWorkspace({
     }
   };
 
+  const archiveQuiz = async (quizId: string, quizTitle: string) => {
+    const confirmed = window.confirm(
+      `Delete “${quizTitle}” and its revisions from the quiz catalog? Attempts and battle history will be preserved.`,
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await archiveAdminQuizSet(quizId);
+      await onRefresh();
+      if (savedQuizId === quizId || revisionParentId === quizId) {
+        setSavedQuizId(null);
+        setTitle("");
+        setDescription("");
+        setPaperId("");
+        setAudienceUniversity("");
+        setAudienceDepartment("");
+        setAudienceLevel("");
+        setRevisionParentId(null);
+        setRevisionSaved(false);
+        setReviewingQuiz(false);
+        setReviewChangesSaved(false);
+        setQuestions([emptyQuestion()]);
+        formRef.current?.reset();
+      }
+      setNotice("Quiz deleted from the catalog. Its attempts and battle history are preserved.");
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Could not delete this quiz.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const updateQuestion = (index: number, patch: Partial<DraftQuestion>) => {
     if (reviewingQuiz) setReviewChangesSaved(false);
     if (revisionParentId) setRevisionSaved(false);
@@ -4556,7 +4591,7 @@ function AdminQuizWorkspace({
                     disabled={saving || !reviewChangesSaved}
                     onClick={() => void review(savedQuizId, "publish")}
                   >
-                    Publish approved questions
+                    Publish quiz
                   </Button>
                   <Button
                     type="button"
@@ -4662,6 +4697,15 @@ function AdminQuizWorkspace({
                     Edit quiz
                   </Button>
                 )}
+              {canManage && quiz.created_by === userId && (
+                <Button
+                  variant="secondary"
+                  disabled={saving}
+                  onClick={() => void archiveQuiz(quiz.id, quiz.title)}
+                >
+                  Delete quiz
+                </Button>
+              )}
               {canReview && quiz.created_by !== userId && quiz.status === "pending_review" && (
                 <Button disabled={saving} onClick={() => void editDraft(quiz.id, true)}>
                   Review questions
