@@ -1917,8 +1917,13 @@ function App() {
             <span className="eyebrow">{selectedCourse.university}</span>
             <h1>{selectedCourse.code}</h1>
             <p>
-              {selectedCourse.title}
-              {selectedCourse.department ? ` · ${selectedCourse.department}` : ""}
+              {[
+                selectedCourse.title,
+                selectedCourse.department ? `Department: ${selectedCourse.department}` : null,
+                selectedCourse.level ? `Level: ${selectedCourse.level}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
           </div>
           <div className="course-actions">
@@ -1944,6 +1949,7 @@ function App() {
                   <PaperRow
                     key={paper.id}
                     paper={paper}
+                    course={selectedCourse}
                     onClick={() => {
                       setSelectedPaperId(paper.id);
                       navigate("paper");
@@ -5220,15 +5226,27 @@ function BattlePage({
   );
 }
 
-function PaperRow({ paper, onClick }: { paper: Paper; onClick: () => void }) {
+function PaperRow({
+  paper,
+  course,
+  onClick,
+}: {
+  paper: Paper;
+  course: Course;
+  onClick: () => void;
+}) {
   return (
     <button className="paper-row" onClick={onClick}>
       <span className="file-tile">▤</span>
       <span>
-        <b>{paper.academic_session}</b>
+        <b>Session: {paper.academic_session || "Not specified"}</b>
         <small>
-          {paper.semester ?? "Past paper"}
-          {paper.exam_year ? ` · ${paper.exam_year}` : ""}
+          Department: {course.department || "Not specified"} · Level:{" "}
+          {course.level || "Not specified"}
+        </small>
+        <small>
+          Semester: {paper.semester || course.semester || "Not specified"} · Exam year:{" "}
+          {paper.exam_year ?? "Not specified"}
         </small>
       </span>
       <span className="badge badge-green">{paper.is_verified ? "Verified" : "Published"}</span>
@@ -5283,9 +5301,10 @@ function PaperPage({
           <span className="badge badge-purple">
             {course.university} · {course.code}
           </span>
-          <h1>{paper.academic_session}</h1>
+          <h1>{paper.academic_session || "Past paper"}</h1>
           <p>
-            {course.title} · {paper.semester ?? "Past paper"}
+            {course.title} · Department: {course.department || "Not specified"} · Level:{" "}
+            {course.level || "Not specified"}
           </p>
         </div>
       </div>
@@ -5297,14 +5316,30 @@ function PaperPage({
             <dd>{course.university}</dd>
           </div>
           <div>
+            <dt>Department</dt>
+            <dd>{course.department || "Not specified"}</dd>
+          </div>
+          <div>
             <dt>Course</dt>
             <dd>
               {course.code} · {course.title}
             </dd>
           </div>
           <div>
-            <dt>Session</dt>
-            <dd>{paper.academic_session}</dd>
+            <dt>Level</dt>
+            <dd>{course.level || "Not specified"}</dd>
+          </div>
+          <div>
+            <dt>Academic session</dt>
+            <dd>{paper.academic_session || "Not specified"}</dd>
+          </div>
+          <div>
+            <dt>Exam year</dt>
+            <dd>{paper.exam_year ?? "Not specified"}</dd>
+          </div>
+          <div>
+            <dt>Semester</dt>
+            <dd>{paper.semester || course.semester || "Not specified"}</dd>
           </div>
           <div>
             <dt>Pages</dt>
