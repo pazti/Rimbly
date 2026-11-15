@@ -843,6 +843,27 @@ function App() {
     setRoute(next);
   };
 
+  const refreshPublishedQuizSets = async (reportEmpty = false) => {
+    setPublishedQuizSetsLoading(true);
+    setError(null);
+    if (reportEmpty) setNotice(null);
+    try {
+      const refreshedQuizzes = await getPublishedQuizSets();
+      setPublishedQuizSets(refreshedQuizzes);
+      if (reportEmpty && !refreshedQuizzes.length) {
+        setNotice(
+          "No quizzes were returned. Confirm a reviewer published the set with at least one approved question and answer key; this list does not filter by department.",
+        );
+      }
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error ? loadError.message : "Could not load published quizzes.",
+      );
+    } finally {
+      setPublishedQuizSetsLoading(false);
+    }
+  };
+
   useEffect(() => {
     const updateRoute = () => setRoute(routeFromLocation());
     window.addEventListener("popstate", updateRoute);
@@ -1976,8 +1997,8 @@ function App() {
             <span className="eyebrow">Published quizzes</span>
             <h1>Choose your challenge.</h1>
             <p>
-              Questions may be entered manually or suggested by AI; a moderator approves each
-              question before it goes live.
+              Your department and university matches appear first, but all published quizzes remain
+              available. A moderator approves each question before it goes live.
             </p>
           </div>
           {publishedQuizSetsLoading ? (
@@ -2002,12 +2023,23 @@ function App() {
               ))}
             </div>
           ) : (
-            <EmptyState
-              title="No published quizzes yet"
-              text="Admins are adding reviewed quiz sets. You can still read past papers in the library."
-              action="Browse past questions"
-              onAction={() => navigate("practice")}
-            />
+            <>
+              <EmptyState
+                title="No published quizzes found"
+                text="A quiz appears after a reviewer approves at least one question with an answer key. Department labels affect priority, not visibility."
+                action="Browse past questions"
+                onAction={() => navigate("practice")}
+              />
+              <div className="admin-actions">
+                <Button
+                  variant="secondary"
+                  disabled={publishedQuizSetsLoading}
+                  onClick={() => void refreshPublishedQuizSets(true)}
+                >
+                  {publishedQuizSetsLoading ? "Refreshing…" : "Refresh quizzes"}
+                </Button>
+              </div>
+            </>
           )}
         </>
       );
@@ -2264,12 +2296,23 @@ function App() {
                 ))}
               </div>
             ) : (
-              <EmptyState
-                title="No published quizzes yet"
-                text="Published quizzes from every department will appear here."
-                action="Browse quizzes"
-                onAction={() => navigate("quiz-setup")}
-              />
+              <>
+                <EmptyState
+                  title="No published quizzes found"
+                  text="Published quizzes from every department appear here after review."
+                  action="Browse quizzes"
+                  onAction={() => navigate("quiz-setup")}
+                />
+                <div className="admin-actions">
+                  <Button
+                    variant="secondary"
+                    disabled={publishedQuizSetsLoading}
+                    onClick={() => void refreshPublishedQuizSets(true)}
+                  >
+                    {publishedQuizSetsLoading ? "Refreshing…" : "Refresh quizzes"}
+                  </Button>
+                </div>
+              </>
             )}
           </section>
           <section>
