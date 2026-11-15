@@ -52,7 +52,11 @@ export default async function handler(request: VercelRequest, response: ServerRe
     response.statusCode = result.status;
     result.headers.forEach((value, name) => response.setHeader(name, value));
     response.end(Buffer.from(await result.arrayBuffer()));
-  } catch {
+  } catch (error) {
+    console.error(
+      "Unexpected quiz extraction API error:",
+      error instanceof Error ? error.message : "Unknown error.",
+    );
     response.statusCode = 500;
     response.setHeader("Content-Type", "application/json; charset=utf-8");
     response.setHeader("Cache-Control", "no-store");

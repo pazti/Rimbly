@@ -1,5 +1,6 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import type { RimblyPlanId } from "./monetization";
 
 export interface Profile {
   id: string;
@@ -112,6 +113,7 @@ export interface QuizAttempt {
   quiz_id?: string | null;
   quiz_title?: string | null;
   score_percent: number;
+  previous_score_percent?: number;
   correct_count: number;
   total_questions: number;
   duration_seconds: number;
@@ -130,6 +132,50 @@ export interface Leader {
   current_win_streak?: number;
   best_win_streak?: number;
   title?: string;
+  is_pro?: boolean;
+}
+
+export interface RimblyBillingStatus {
+  is_pro: boolean;
+  plan_id: RimblyPlanId | "free";
+  expires_at: string | null;
+  quizzes_used_today: number;
+  free_quiz_limit: number;
+  battle_invites_used_today: number;
+  free_battle_limit: number;
+  completed_battles_today: number;
+  did_practice_today: boolean;
+  latest_payment_ref: string | null;
+  latest_payment_status: "pending" | "paid" | "failed" | null;
+}
+
+export interface QuizAttemptReviewItem {
+  id: string;
+  position: number;
+  prompt: string;
+  options: string[];
+  correct_index: number;
+  selected_index: number;
+  explanation: string;
+}
+
+export interface PlayerBadge {
+  badge_id: "first_win" | "perfect_score" | "speed_demon" | "daily_7";
+  earned_at: string;
+}
+
+export interface GameProgress {
+  points: number;
+  quizzes_completed: number;
+  battles_played: number;
+  battle_wins: number;
+  battle_losses: number;
+  current_win_streak: number;
+  best_win_streak: number;
+  current_daily_streak: number;
+  best_daily_streak: number;
+  title: string;
+  badges: PlayerBadge[];
 }
 
 export interface BattleOpponent {
@@ -422,12 +468,36 @@ export async function getQuizAttempts(userId: string) {
   );
 }
 
-export async function getLeaderboard(university?: string | null) {
+export async function getQuizAttemptReview(attemptId: string) {
+  const { data, error } = await requireSupabase().rpc("get_quiz_attempt_review", {
+    p_attempt_id: attemptId,
+  });
+  if (error) throw error;
+  return (data ?? []) as QuizAttemptReviewItem[];
+}
+
+export async function getLeaderboard(
+  university?: string | null,
+  period: "all-time" | "weekly" = "all-time",
+) {
   const { data, error } = await requireSupabase().rpc("get_game_leaderboard", {
     p_university: university ?? null,
+    p_period: period,
   });
   if (error) throw error;
   return (data ?? []) as Leader[];
+}
+
+export async function getGameProgress() {
+  const { data, error } = await requireSupabase().rpc("get_my_game_progress");
+  if (error) throw error;
+  return data as GameProgress;
+}
+
+export async function getMyRimblyBillingStatus() {
+  const { data, error } = await requireSupabase().rpc("get_my_rimbly_billing_status");
+  if (error) throw error;
+  return data as RimblyBillingStatus;
 }
 
 export async function getAdminQuizSets() {

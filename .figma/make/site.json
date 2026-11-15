@@ -1,8 +1,11 @@
 {
   "title": "Rimbly | Practice. Battle. Climb.",
   "description": "Rimbly helps university students practice with real past questions, battle peers, and grow their academic edge.",
-  "robots": {
-    "index": false
+  "icons": {
+    "icon": "/favicon.png"
+  },
+  "openGraph": {
+    "image": "/rimbly-share-preview.png"
   },
   "accessibility": {
     "addBypassLinks": false,

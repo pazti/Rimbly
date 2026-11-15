@@ -8,7 +8,6 @@ import { handleQuizExtraction } from './src/server/quiz-extraction'
 
 import siteConfiguration from './.figma/make/site.json'
 
-
 // Vite config — https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
@@ -22,7 +21,7 @@ export default defineConfig(({ mode }) => {
       minify: !emitSourcemaps,
     },
     plugins: [
-react(),
+      react(),
       tailwindcss(),
       localQuizExtractionApi(environment),
       figmaSiteConfiguration(siteConfiguration),
@@ -47,9 +46,7 @@ react(),
           : []),
       ],
       watch: {
-        ignored: [
-          '**/.figma/**',
-],
+        ignored: ['**/.figma/**'],
       },
     },
     preview: {
@@ -98,12 +95,22 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
     return html.replace(`<!-- ${slotName} -->`, content)
   }
 
-  const title = config.title ?? "Figma Make App"
+  const title = config.title ?? 'Figma Make App'
   const description = config.description ?? ''
   // Imported HTML keeps its own favicon. New Makes use PNG because Google Search does not
   // support SVG favicons, even though browsers do.
   const favicon = config.icons?.icon ?? '/favicon.png'
-  const socialImage = config.openGraph?.image ?? ''
+  const vercelProductionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  const publicOrigin =
+    process.env.APP_URL ??
+    process.env.VITE_SITE_URL ??
+    process.env.FIGMA_PUBLIC_URL ??
+    (vercelProductionUrl ? `https://${vercelProductionUrl}` : 'https://rimbly.vercel.app')
+  const socialImage = config.openGraph?.image
+    ? publicOrigin
+      ? new URL(config.openGraph.image, publicOrigin).toString()
+      : config.openGraph.image
+    : ''
   const language = sanitizeHtmlValue(config.language) || 'en'
   const googleAnalyticsId = sanitizeHtmlValue(config.analytics?.googleAnalyticsId)
   const headStart = config.customScripts?.headStart ?? ''
@@ -144,25 +151,108 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
 
         const tags: HtmlTagDescriptor[] = []
         if (description) {
-          tags.push({ tag: 'meta', attrs: { name: 'description', content: description }, injectTo: 'head' })
+          tags.push({
+            tag: 'meta',
+            attrs: { name: 'description', content: description },
+            injectTo: 'head',
+          })
         }
         if (config.robots?.index === false) {
-          tags.push({ tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' }, injectTo: 'head' })
+          tags.push({
+            tag: 'meta',
+            attrs: { name: 'robots', content: 'noindex, nofollow' },
+            injectTo: 'head',
+          })
         }
         if (favicon) {
-          tags.push({ tag: 'link', attrs: { rel: 'icon', href: favicon }, injectTo: 'head' })
+          tags.push({
+            tag: 'link',
+            attrs: {
+              rel: 'icon',
+              type: favicon.endsWith('.svg') ? 'image/svg+xml' : 'image/png',
+              href: favicon,
+            },
+            injectTo: 'head',
+          })
         }
         if (title) {
-          tags.push({ tag: 'meta', attrs: { property: 'og:title', content: title }, injectTo: 'head' })
+          tags.push({
+            tag: 'meta',
+            attrs: { property: 'og:title', content: title },
+            injectTo: 'head',
+          })
         }
         if (description) {
-          tags.push({ tag: 'meta', attrs: { property: 'og:description', content: description }, injectTo: 'head' })
+          tags.push({
+            tag: 'meta',
+            attrs: { property: 'og:description', content: description },
+            injectTo: 'head',
+          })
         }
         if (socialImage) {
           tags.push(
-            { tag: 'meta', attrs: { property: 'og:image', content: socialImage }, injectTo: 'head' },
-            { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' }, injectTo: 'head' },
-            { tag: 'meta', attrs: { name: 'twitter:image', content: socialImage }, injectTo: 'head' },
+            { tag: 'meta', attrs: { property: 'og:type', content: 'website' }, injectTo: 'head' },
+            {
+              tag: 'meta',
+              attrs: { property: 'og:site_name', content: 'Rimbly' },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: { property: 'og:image', content: socialImage },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: { property: 'og:image:width', content: '3040' },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: { property: 'og:image:height', content: '1280' },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: {
+                property: 'og:image:alt',
+                content: 'Rimbly purple cheetah logo and wordmark',
+              },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: { name: 'twitter:card', content: 'summary_large_image' },
+              injectTo: 'head',
+            },
+            { tag: 'meta', attrs: { name: 'twitter:title', content: title }, injectTo: 'head' },
+            {
+              tag: 'meta',
+              attrs: { name: 'twitter:description', content: description },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: { name: 'twitter:image', content: socialImage },
+              injectTo: 'head',
+            },
+            {
+              tag: 'meta',
+              attrs: {
+                name: 'twitter:image:alt',
+                content: 'Rimbly purple cheetah logo and wordmark',
+              },
+              injectTo: 'head',
+            },
+            ...(publicOrigin
+              ? [
+                  {
+                    tag: 'meta' as const,
+                    attrs: { property: 'og:url', content: new URL('/', publicOrigin).toString() },
+                    injectTo: 'head' as const,
+                  },
+                ]
+              : []),
           )
         }
 
@@ -353,7 +443,9 @@ function figmaReactRefreshBoundaryFallback(): Plugin {
  * into shipped bundles.
  */
 function figmaMakeKitPlugin(options: { storiesGlob: string | string[] }): Plugin {
-  const storiesGlob = Array.isArray(options.storiesGlob) ? options.storiesGlob : [options.storiesGlob]
+  const storiesGlob = Array.isArray(options.storiesGlob)
+    ? options.storiesGlob
+    : [options.storiesGlob]
   const ROUTE = '/.figma/make/kit.html'
   const VIRTUAL_ID = 'virtual:figma-stories'
   const RESOLVED_ID = '\0' + VIRTUAL_ID
@@ -409,7 +501,10 @@ function figmaMakeKitPlugin(options: { storiesGlob: string | string[] }): Plugin
  */
 function figmaLinkedPackageSourcemaps(): Plugin {
   const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'))
-  const linkedPackages = Object.keys({ ...packageJson.dependencies, ...packageJson.devDependencies }).flatMap((name) => {
+  const linkedPackages = Object.keys({
+    ...packageJson.dependencies,
+    ...packageJson.devDependencies,
+  }).flatMap((name) => {
     const installedDir = path.resolve(__dirname, 'node_modules', name)
     try {
       const realDir = fs.realpathSync(installedDir)
@@ -428,7 +523,10 @@ function figmaLinkedPackageSourcemaps(): Plugin {
     const url = sourceMappingUrl.exec(code)?.[1]
     try {
       if (url?.startsWith('data:')) {
-        return { map: JSON.parse(Buffer.from(url.split(',')[1], 'base64').toString()), mapDir: path.dirname(file) }
+        return {
+          map: JSON.parse(Buffer.from(url.split(',')[1], 'base64').toString()),
+          mapDir: path.dirname(file),
+        }
       }
       if (url) {
         const mapFile = path.resolve(path.dirname(file), url)
@@ -437,7 +535,13 @@ function figmaLinkedPackageSourcemaps(): Plugin {
     } catch {}
     // Without a usable input map, map every line to itself.
     const mappings = code.split('\n').map((_, i) => (i ? 'AACA' : 'AAAA'))
-    const map = { version: 3, sources: [file], sourcesContent: [code], names: [], mappings: mappings.join(';') }
+    const map = {
+      version: 3,
+      sources: [file],
+      sourcesContent: [code],
+      names: [],
+      mappings: mappings.join(';'),
+    }
     return { map, mapDir: path.dirname(file) }
   }
 
@@ -491,7 +595,9 @@ function localQuizExtractionApi(environment: Record<string, string>): Plugin {
 
       const host = request.headers.host || 'localhost'
       const forwardedProtocol = request.headers['x-forwarded-proto']
-      const protocol = Array.isArray(forwardedProtocol) ? forwardedProtocol[0] : forwardedProtocol || 'http'
+      const protocol = Array.isArray(forwardedProtocol)
+        ? forwardedProtocol[0]
+        : forwardedProtocol || 'http'
       const headers = new Headers()
       for (const name of ['authorization', 'content-type', 'origin']) {
         const value = request.headers[name]

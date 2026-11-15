@@ -1,2 +1,4 @@
 # AgentPlat packages this default favicon directly from source without LFS hydration.
 favicon.png -filter -diff -merge -text
+rimbly-icon.png -filter -diff -merge -text
+rimbly-share-preview.png -filter -diff -merge -text

@@ -13,9 +13,12 @@ import {
   AdminStudent,
   AdminTeamMember,
   MaintenanceStatus,
+  RimblyBillingStatus,
+  QuizAttemptReviewItem,
   Contribution,
   Battle,
   Course,
+  GameProgress,
   Leader,
   Paper,
   Profile,
@@ -54,6 +57,7 @@ import {
   setAdminStudentSuspension,
   updateAdminTeamMember,
   getLeaderboard,
+  getGameProgress,
   getNotifications,
   getPapers,
   getPaperReaderUrl,
@@ -76,8 +80,11 @@ import {
   saveProfile,
   reviewAdminContribution,
   toggleSavedCourse,
+  getMyRimblyBillingStatus,
+  getQuizAttemptReview,
 } from "./lib/data";
 import { supabase, supabaseConfigurationError } from "./lib/supabase";
+import { rimblyProPlans, RimblyPlanId } from "./lib/monetization";
 
 type Route =
   | "welcome"
@@ -97,6 +104,7 @@ type Route =
   | "battle"
   | "leaderboard"
   | "profile"
+  | "subscription"
   | "contribute"
   | "suggest"
   | "notifications"
@@ -126,6 +134,7 @@ const routes: Route[] = [
   "battle",
   "leaderboard",
   "profile",
+  "subscription",
   "contribute",
   "suggest",
   "notifications",
@@ -209,6 +218,7 @@ function Button({
   disabled = false,
   name,
   value,
+  ariaLabel,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -217,6 +227,7 @@ function Button({
   disabled?: boolean;
   name?: string;
   value?: string;
+  ariaLabel?: string;
 }) {
   return (
     <button
@@ -226,6 +237,7 @@ function Button({
       disabled={disabled}
       name={name}
       value={value}
+      aria-label={ariaLabel}
     >
       {children}
     </button>
@@ -236,10 +248,7 @@ function Logo({ onClick }: { onClick: () => void }) {
   return (
     <button className="logo" onClick={onClick} aria-label="Rimbly home">
       <span className="logo-mark" aria-hidden="true">
-        <img
-          src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/colour%20icon%20preview-U3JEroXylKhRU0xn7PCPxbARnG2r4D.png"
-          alt=""
-        />
+        <img src="/rimbly-icon.png" alt="" />
       </span>
       <span>Rimbly</span>
     </button>
@@ -601,10 +610,7 @@ function MaintenancePage({
       <section className="maintenance-card" aria-labelledby="maintenance-title">
         <div className="logo maintenance-logo" aria-label="Rimbly">
           <span className="logo-mark" aria-hidden="true">
-            <img
-              src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/colour%20icon%20preview-U3JEroXylKhRU0xn7PCPxbARnG2r4D.png"
-              alt=""
-            />
+            <img src="/rimbly-icon.png" alt="" />
           </span>
           <span>Rimbly</span>
         </div>
@@ -773,16 +779,20 @@ function QuizCatalogCard({
 
   return (
     <article className="quiz-catalog-card">
-      <div>
+      <div className="quiz-card-top">
+        <span className="quiz-card-mark" aria-hidden="true">
+          ✦
+        </span>
+        <span className="quiz-card-question-count">{quiz.question_count} questions</span>
+      </div>
+      <div className="quiz-card-copy">
+        {courseLabel && <span className="quiz-card-course">{courseLabel}</span>}
         <h2>{quiz.title}</h2>
         <p>{quiz.description || "Reviewed practice questions"}</p>
-        <small>
-          {courseLabel ? `Course: ${courseLabel} · ` : ""}
-          {quiz.question_count} questions
-        </small>
+      </div>
+      <div className="quiz-card-meta">
         <small className="quiz-audience-meta">
-          Department: {departments.join(" / ") || "General"} · University:{" "}
-          {universities.join(" / ") || "All universities"}
+          {departments.join(" / ") || "General"} · {universities.join(" / ") || "All universities"}
         </small>
         {quiz.source_file_path && (
           <button type="button" className="quiz-source-link" onClick={onReadSource}>
@@ -790,9 +800,418 @@ function QuizCatalogCard({
           </button>
         )}
       </div>
-      <Button disabled={busy} onClick={onTake}>
-        {busy ? "Loading…" : "Take quiz"}
+      <Button disabled={busy} onClick={onTake} ariaLabel={`Start quiz: ${quiz.title}`}>
+        {busy ? "Loading…" : "Start quiz"}
+        <span aria-hidden="true">→</span>
       </Button>
+    </article>
+  );
+}
+
+function DailyGoalCard({
+  status,
+  progress,
+  loading,
+  error,
+  onQuiz,
+  onBattle,
+  onPlans,
+}: {
+  status: RimblyBillingStatus | null;
+  progress: GameProgress | null;
+  loading: boolean;
+  error: string | null;
+  onQuiz: () => void;
+  onBattle: () => void;
+  onPlans: () => void;
+}) {
+  const didPractice = status?.did_practice_today ?? false;
+  const quizRemaining = status
+    ? Math.max(0, status.free_quiz_limit - status.quizzes_used_today)
+    : null;
+  const battleRemaining = status
+    ? Math.max(0, status.free_battle_limit - status.battle_invites_used_today)
+    : null;
+
+  return (
+    <section className={`daily-goal-card ${didPractice ? "completed" : ""}`}>
+      <div className="daily-goal-main">
+        <span className="daily-goal-icon" aria-hidden="true">
+          {didPractice ? "✓" : "✦"}
+        </span>
+        <div>
+          <span className="eyebrow">{didPractice ? "Daily goal complete" : "Your daily goal"}</span>
+          <h2>
+            {didPractice
+              ? "You showed up for yourself today."
+              : "One practice session. Keep your streak alive."}
+          </h2>
+          <p>
+            {progress
+              ? `You’re on a ${progress.current_daily_streak}-day study streak. Practice with a quiz or battle today to keep it going.`
+              : "Complete one quiz or battle today to build a steady study habit."}
+          </p>
+        </div>
+      </div>
+      <div className="daily-goal-footer">
+        <div className="daily-goal-allowances" aria-label="Today's free allowances">
+          {loading ? (
+            <span className="daily-goal-usage" role="status">
+              Loading today’s allowance…
+            </span>
+          ) : status ? (
+            <>
+              <span className="daily-goal-usage">
+                {status.is_pro ? "Unlimited quizzes" : `${quizRemaining} free quizzes left`}
+              </span>
+              <span className="daily-goal-usage">
+                {status.is_pro ? "Unlimited battles" : `${battleRemaining} battle invites left`}
+              </span>
+            </>
+          ) : (
+            <button type="button" className="daily-goal-usage-link" onClick={onPlans}>
+              {error ? "Usage unavailable · Check plans" : "See your daily limits"}
+            </button>
+          )}
+        </div>
+        <div className="daily-goal-actions">
+          <Button onClick={onQuiz}>Start a quiz</Button>
+          <Button variant="secondary" onClick={onBattle}>
+            Start a battle
+          </Button>
+        </div>
+      </div>
+      {error && !status && (
+        <small className="daily-goal-error" role="status">
+          Usage could not load: {error}
+        </small>
+      )}
+    </section>
+  );
+}
+
+function WeeklyResetNote() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const reset = new Date(now);
+  const daysUntilMonday = (8 - reset.getUTCDay()) % 7 || 7;
+  reset.setUTCDate(reset.getUTCDate() + daysUntilMonday);
+  reset.setUTCHours(0, 0, 0, 0);
+  const remaining = Math.max(0, reset.getTime() - now);
+  const days = Math.floor(remaining / 86_400_000);
+  const hours = Math.floor((remaining % 86_400_000) / 3_600_000);
+  const minutes = Math.floor((remaining % 3_600_000) / 60_000);
+  const timeLeft = days ? `${days}d ${hours}h` : `${hours}h ${minutes}m`;
+
+  return (
+    <p
+      className="leaderboard-period-note"
+      role="timer"
+      aria-label={`Weekly leaderboard resets in ${timeLeft}`}
+    >
+      Weekly leaderboard resets in <strong>{timeLeft}</strong> · every Monday at 00:00 UTC.
+    </p>
+  );
+}
+
+function SubscriptionPage({
+  status,
+  loading,
+  error,
+  paymentReference,
+  checkoutBusy,
+  attempts,
+  papers,
+  courses,
+  onRefresh,
+  onChoosePlan,
+}: {
+  status: RimblyBillingStatus | null;
+  loading: boolean;
+  error: string | null;
+  paymentReference: string | null;
+  checkoutBusy: boolean;
+  attempts: QuizAttempt[];
+  papers: Paper[];
+  courses: Course[];
+  onRefresh: () => void;
+  onChoosePlan: (planId: RimblyPlanId) => void;
+}) {
+  const paymentMatches = Boolean(
+    paymentReference && status?.latest_payment_ref === paymentReference,
+  );
+  const paymentPaid = paymentMatches && status?.latest_payment_status === "paid";
+  const paymentFailed = paymentMatches && status?.latest_payment_status === "failed";
+
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const recentAttempts = attempts
+    .filter((attempt) => new Date(attempt.created_at).getTime() >= cutoff)
+    .sort((first, second) => first.created_at.localeCompare(second.created_at));
+  const completedQuestions = recentAttempts.reduce(
+    (total, attempt) => total + attempt.total_questions,
+    0,
+  );
+  const correctAnswers = recentAttempts.reduce(
+    (total, attempt) => total + attempt.correct_count,
+    0,
+  );
+  const averageScore = recentAttempts.length
+    ? Math.round(
+        recentAttempts.reduce((total, attempt) => total + attempt.score_percent, 0) /
+          recentAttempts.length,
+      )
+    : 0;
+  const paperById = new Map(papers.map((paper) => [paper.id, paper]));
+  const courseById = new Map(courses.map((course) => [course.id, course]));
+  const courseResults = new Map<string, { label: string; correct: number; total: number }>();
+  for (const attempt of recentAttempts) {
+    const paper = attempt.paper_id ? paperById.get(attempt.paper_id) : undefined;
+    const course = paper ? courseById.get(paper.course_id) : undefined;
+    const key = course?.id ?? attempt.quiz_title ?? attempt.id;
+    const result = courseResults.get(key) ?? {
+      label: course ? `${course.code} · ${course.title}` : (attempt.quiz_title ?? "Practice quiz"),
+      correct: 0,
+      total: 0,
+    };
+    result.correct += attempt.correct_count;
+    result.total += attempt.total_questions;
+    courseResults.set(key, result);
+  }
+  const courseBreakdown = [...courseResults.values()]
+    .map((result) => ({
+      ...result,
+      accuracy: result.total ? Math.round((result.correct / result.total) * 100) : 0,
+    }))
+    .sort((first, second) => second.accuracy - first.accuracy)
+    .slice(0, 5);
+
+  return (
+    <>
+      <div className="page-head compact">
+        <span className="eyebrow">Learn more, keep your momentum</span>
+        <h1>Rimbly Pro</h1>
+        <p>
+          More practice, deeper insight, and a little extra campus flair. Your past-question library
+          stays free.
+        </p>
+      </div>
+      {paymentReference && (
+        <div className={`billing-payment-message ${paymentFailed ? "failed" : ""}`} role="status">
+          <div>
+            <strong>
+              {paymentPaid
+                ? "Your Rimbly Pro payment is confirmed."
+                : paymentFailed
+                  ? "That payment was not completed."
+                  : "We’re confirming your payment."}
+            </strong>
+            <p>
+              {paymentPaid
+                ? "Your plan is active. Welcome to Pro."
+                : paymentFailed
+                  ? "You have not been charged for an unsuccessful payment. You can try again."
+                  : "Access starts only after SquadCo verifies the payment. This can take a moment."}
+            </p>
+          </div>
+          {!paymentPaid && (
+            <Button variant="secondary" onClick={onRefresh}>
+              Check status
+            </Button>
+          )}
+        </div>
+      )}
+      {error && (
+        <p className="app-feedback" role="alert">
+          Subscription status could not load: {error}
+        </p>
+      )}
+      <section className="billing-current-plan">
+        <div>
+          <span className="eyebrow">Your plan</span>
+          <h2>
+            {loading ? "Checking your plan…" : status?.is_pro ? "Rimbly Pro" : "Free Forever"}
+          </h2>
+          <p>
+            {status?.is_pro && status.expires_at
+              ? `Active until ${new Date(status.expires_at).toLocaleDateString(undefined, {
+                  dateStyle: "long",
+                })}. Plans do not auto-renew.`
+              : "Core study tools and the past-question library stay free."}
+          </p>
+        </div>
+        {status?.is_pro && <span className="badge badge-purple pro-flair">PRO SCHOLAR</span>}
+      </section>
+
+      <section className="billing-usage">
+        <div className="section-title">
+          <div>
+            <span>Today · UTC</span>
+            <h2>Your free-plan usage</h2>
+          </div>
+          {status && <button onClick={onRefresh}>Refresh</button>}
+        </div>
+        <div className="billing-usage-grid">
+          <UsageMeter
+            label="Quiz submissions"
+            used={status?.quizzes_used_today ?? 0}
+            limit={status?.free_quiz_limit ?? 5}
+            unlimited={Boolean(status?.is_pro)}
+          />
+          <UsageMeter
+            label="Battle invites sent"
+            used={status?.battle_invites_used_today ?? 0}
+            limit={status?.free_battle_limit ?? 3}
+            unlimited={Boolean(status?.is_pro)}
+          />
+        </div>
+      </section>
+
+      <section className="billing-plans">
+        <div className="section-title">
+          <div>
+            <span>Choose your term</span>
+            <h2>Student-friendly pricing</h2>
+          </div>
+        </div>
+        <div className="billing-plan-grid">
+          {rimblyProPlans.map((plan) => (
+            <article
+              className={`billing-plan-card ${plan.id === "semester" ? "featured" : ""}`}
+              key={plan.id}
+            >
+              {plan.id === "semester" && <span className="badge badge-purple">Best value</span>}
+              <h3>{plan.name}</h3>
+              <strong className="billing-price">₦{plan.priceNaira.toLocaleString("en-NG")}</strong>
+              <small>for {plan.duration}</small>
+              <Button disabled={checkoutBusy || loading} onClick={() => onChoosePlan(plan.id)}>
+                {checkoutBusy
+                  ? "Opening checkout…"
+                  : status?.is_pro
+                    ? "Add time"
+                    : "Get Rimbly Pro"}
+              </Button>
+            </article>
+          ))}
+        </div>
+        <p className="billing-disclaimer">
+          One-time payment per term. No automatic renewals. Checkout is hosted by SquadCo.
+        </p>
+      </section>
+
+      <section className="billing-comparison" aria-label="Free and Pro plan comparison">
+        <article>
+          <span className="eyebrow">Free Forever</span>
+          <h2>Strong basics, always free</h2>
+          <ul>
+            <li>Past-question library</li>
+            <li>5 quiz submissions per day</li>
+            <li>3 one-on-one battle invites per day</li>
+            <li>University leaderboard and standard titles</li>
+            <li>Basic practice stats</li>
+          </ul>
+        </article>
+        <article className="billing-comparison-pro">
+          <span className="eyebrow">Rimbly Pro</span>
+          <h2>More room to improve</h2>
+          <ul>
+            <li>Unlimited quiz submissions and battle invites</li>
+            <li>Detailed 30-day performance analytics</li>
+            <li>Exclusive Pro Scholar profile and leaderboard flair</li>
+            <li>Priority matchmaking when automatic matchmaking is available</li>
+          </ul>
+        </article>
+      </section>
+
+      {status?.is_pro && (
+        <section className="pro-analytics">
+          <div className="section-title">
+            <div>
+              <span>Rimbly Pro</span>
+              <h2>Your 30-day performance</h2>
+            </div>
+          </div>
+          {recentAttempts.length ? (
+            <>
+              <div className="pro-analytics-stats">
+                <article>
+                  <strong>{recentAttempts.length}</strong>
+                  <small>Quiz submissions</small>
+                </article>
+                <article>
+                  <strong>{averageScore}%</strong>
+                  <small>Average score</small>
+                </article>
+                <article>
+                  <strong>
+                    {completedQuestions
+                      ? Math.round((correctAnswers / completedQuestions) * 100)
+                      : 0}
+                    %
+                  </strong>
+                  <small>Question accuracy</small>
+                </article>
+              </div>
+              <div
+                className="pro-score-trend"
+                role="img"
+                aria-label="Scores for your recent quizzes"
+              >
+                {recentAttempts.slice(-12).map((attempt) => (
+                  <span
+                    key={attempt.id}
+                    title={`${attempt.quiz_title ?? "Quiz"}: ${attempt.score_percent}%`}
+                    style={{ height: `${Math.max(8, attempt.score_percent)}%` }}
+                  />
+                ))}
+              </div>
+              {courseBreakdown.length > 0 && (
+                <div className="pro-course-breakdown">
+                  <h3>Accuracy by course</h3>
+                  {courseBreakdown.map((result) => (
+                    <div className="pro-course-row" key={result.label}>
+                      <span>{result.label}</span>
+                      <strong>{result.accuracy}%</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="field-note">
+              Complete a quiz to start your 30-day score, accuracy, and course insights.
+            </p>
+          )}
+        </section>
+      )}
+    </>
+  );
+}
+
+function UsageMeter({
+  label,
+  used,
+  limit,
+  unlimited,
+}: {
+  label: string;
+  used: number;
+  limit: number;
+  unlimited: boolean;
+}) {
+  const progress = limit ? Math.min(100, (used / limit) * 100) : 0;
+  return (
+    <article className="billing-usage-meter">
+      <div>
+        <strong>{label}</strong>
+        <span>{unlimited ? "Unlimited on Pro" : `${used} of ${limit} used`}</span>
+      </div>
+      <div className="billing-meter-track" aria-hidden="true">
+        <span style={{ width: `${unlimited ? 100 : progress}%` }} />
+      </div>
     </article>
   );
 }
@@ -815,6 +1234,13 @@ function App() {
   const [error, setError] = useState<string | null>(supabaseConfigurationError);
   const [notice, setNotice] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [gameProgress, setGameProgress] = useState<GameProgress | null>(null);
+  const [gameProgressLoading, setGameProgressLoading] = useState(true);
+  const [gameProgressError, setGameProgressError] = useState<string | null>(null);
+  const [billingStatus, setBillingStatus] = useState<RimblyBillingStatus | null>(null);
+  const [billingStatusLoading, setBillingStatusLoading] = useState(true);
+  const [billingStatusError, setBillingStatusError] = useState<string | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [universities, setUniversities] = useState<University[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -828,6 +1254,9 @@ function App() {
   const [questions, setQuestions] = useState<PublicQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [lastAttempt, setLastAttempt] = useState<QuizAttempt | null>(null);
+  const [lastAttemptReview, setLastAttemptReview] = useState<QuizAttemptReviewItem[]>([]);
+  const [lastAttemptReviewLoading, setLastAttemptReviewLoading] = useState(false);
+  const [lastAttemptReviewError, setLastAttemptReviewError] = useState<string | null>(null);
   const [paperQuizAvailability, setPaperQuizAvailability] = useState<PaperQuizAvailability | null>(
     null,
   );
@@ -836,6 +1265,9 @@ function App() {
   const [activeQuizSetId, setActiveQuizSetId] = useState<string | null>(null);
   const [sourceToRead, setSourceToRead] = useState<{ path: string; title: string } | null>(null);
   const [leaderboardScope, setLeaderboardScope] = useState<"university" | "all">("university");
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState<"weekly" | "all-time">("weekly");
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
 
   const user = session?.user ?? null;
   const selectedCourse = courses.find((course) => course.id === selectedCourseId) ?? null;
@@ -854,6 +1286,58 @@ function App() {
     setNotice(null);
     window.history.pushState({ route: next }, "", routeUrl(next));
     setRoute(next);
+  };
+
+  const startProCheckout = async (planId: RimblyPlanId) => {
+    if (!session?.access_token) {
+      setBillingStatusError("Sign in again before starting checkout.");
+      return;
+    }
+    setCheckoutBusy(true);
+    setBillingStatusError(null);
+    try {
+      const response = await fetch("/api/squadco/checkout", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ planId }),
+      });
+      const result = (await response.json()) as {
+        checkoutUrl?: unknown;
+        error?: unknown;
+      };
+      if (!response.ok) {
+        throw new Error(
+          typeof result.error === "string" ? result.error : "Could not start SquadCo checkout.",
+        );
+      }
+      if (typeof result.checkoutUrl !== "string") {
+        throw new Error("SquadCo returned an invalid checkout link.");
+      }
+      window.location.assign(result.checkoutUrl);
+    } catch (checkoutError) {
+      setBillingStatusError(
+        checkoutError instanceof Error ? checkoutError.message : "Could not start checkout.",
+      );
+    } finally {
+      setCheckoutBusy(false);
+    }
+  };
+
+  const refreshRimblyBillingStatus = async () => {
+    setBillingStatusLoading(true);
+    setBillingStatusError(null);
+    try {
+      setBillingStatus(await getMyRimblyBillingStatus());
+    } catch (statusError) {
+      setBillingStatusError(
+        statusError instanceof Error ? statusError.message : "Could not load subscription details.",
+      );
+    } finally {
+      setBillingStatusLoading(false);
+    }
   };
 
   const refreshPublishedQuizSets = async (reportEmpty = false) => {
@@ -1029,6 +1513,97 @@ function App() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!user) {
+      setGameProgress(null);
+      setGameProgressError(null);
+      setGameProgressLoading(false);
+      return;
+    }
+    let active = true;
+    setGameProgressLoading(true);
+    setGameProgressError(null);
+    void getGameProgress()
+      .then((result) => {
+        if (active) setGameProgress(result);
+      })
+      .catch((progressError: unknown) => {
+        if (active) {
+          setGameProgressError(
+            progressError instanceof Error
+              ? progressError.message
+              : "Could not load your game progress.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setGameProgressLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user) {
+      setBillingStatus(null);
+      setBillingStatusError(null);
+      setBillingStatusLoading(false);
+      return;
+    }
+
+    let active = true;
+    let pollCount = 0;
+    const paymentReference =
+      route === "subscription" ? new URLSearchParams(window.location.search).get("payment") : null;
+    setBillingStatusLoading(true);
+    setBillingStatusError(null);
+
+    const refresh = async () => {
+      try {
+        const status = await getMyRimblyBillingStatus();
+        if (!active) return;
+        setBillingStatus(status);
+        setBillingStatusError(null);
+        if (
+          paymentReference &&
+          status.latest_payment_ref === paymentReference &&
+          status.latest_payment_status !== "pending"
+        ) {
+          window.clearInterval(pollInterval);
+        }
+      } catch (statusError) {
+        if (active) {
+          setBillingStatusError(
+            statusError instanceof Error
+              ? statusError.message
+              : "Could not load subscription details.",
+          );
+        }
+      } finally {
+        if (active) setBillingStatusLoading(false);
+      }
+    };
+
+    void refresh();
+    const pollInterval =
+      paymentReference && route === "subscription"
+        ? window.setInterval(() => {
+            pollCount += 1;
+            if (pollCount >= 20) {
+              window.clearInterval(pollInterval);
+              return;
+            }
+            void refresh();
+          }, 3000)
+        : undefined;
+
+    return () => {
+      active = false;
+      if (pollInterval) window.clearInterval(pollInterval);
+    };
+  }, [route, user?.id]);
+
+  useEffect(() => {
     if (!user || !["quiz-setup", "paper", "profile"].includes(route)) return;
     let active = true;
     setPublishedQuizSetsLoading(true);
@@ -1053,18 +1628,29 @@ function App() {
   useEffect(() => {
     if (!user || !profile || route !== "leaderboard") return;
     let active = true;
-    void getLeaderboard(leaderboardScope === "university" ? profile.university : null)
+    setLeaderboardLoading(true);
+    setLeaderboardError(null);
+    void getLeaderboard(
+      leaderboardScope === "university" ? profile.university : null,
+      leaderboardPeriod,
+    )
       .then((result) => {
         if (active) setLeaders(result);
       })
       .catch((loadError: unknown) => {
-        if (active)
-          setError(loadError instanceof Error ? loadError.message : "Could not load rankings.");
+        if (active) {
+          setLeaderboardError(
+            loadError instanceof Error ? loadError.message : "Could not load rankings.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setLeaderboardLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [leaderboardScope, profile?.university, route, user?.id]);
+  }, [leaderboardPeriod, leaderboardScope, profile?.university, route, user?.id]);
 
   useEffect(() => {
     if (route !== "paper" || !selectedPaper) {
@@ -1135,17 +1721,27 @@ function App() {
 
   const refreshActivity = async () => {
     if (!user) return;
-    const [nextAttempts, nextLeaders, nextNotifications, nextContributions] = await Promise.all([
-      getQuizAttempts(user.id),
-      getLeaderboard(),
-      getNotifications(user.id),
-      getContributions(user.id),
-    ]);
+    const [nextAttempts, nextLeaders, nextNotifications, nextContributions, nextGameProgress] =
+      await Promise.all([
+        getQuizAttempts(user.id),
+        getLeaderboard(
+          leaderboardScope === "university" ? profile?.university : null,
+          leaderboardPeriod,
+        ),
+        getNotifications(user.id),
+        getContributions(user.id),
+        getGameProgress(),
+      ]);
     setAttempts(nextAttempts);
     setLastAttempt(nextAttempts[0] ?? null);
     setLeaders(nextLeaders);
     setNotifications(nextNotifications);
     setContributions(nextContributions);
+    setGameProgress(nextGameProgress);
+    setGameProgressError(null);
+    setGameProgressLoading(false);
+    setLeaderboardError(null);
+    await refreshRimblyBillingStatus();
   };
 
   const handleAuth = async (event: FormEvent<HTMLFormElement>, mode: "signup" | "login") => {
@@ -1335,6 +1931,8 @@ function App() {
       setQuestions(nextQuestions);
       setAnswers({});
       setLastAttempt(null);
+      setLastAttemptReview([]);
+      setLastAttemptReviewError(null);
       setQuizStartedAt(Date.now());
       navigate("quiz");
     } catch (questionError) {
@@ -1353,11 +1951,32 @@ function App() {
     try {
       const duration = Math.max(0, Math.floor((Date.now() - quizStartedAt) / 1000));
       const attempt = await submitQuizSet(activeQuizSetId, answers, duration);
+      const activeQuiz = publishedQuizSets.find((quiz) => quiz.id === activeQuizSetId);
+      const previousAttempt = attempts.find(
+        (item) =>
+          item.quiz_id === activeQuizSetId ||
+          (!!activeQuiz?.paper_id && item.paper_id === activeQuiz.paper_id),
+      );
       setLastAttempt({
         ...attempt,
         points_earned: attempt.points_earned ?? attempt.correct_count * 10,
+        previous_score_percent: previousAttempt?.score_percent,
       });
+      setLastAttemptReview([]);
+      setLastAttemptReviewLoading(true);
+      setLastAttemptReviewError(null);
       navigate("results");
+      try {
+        setLastAttemptReview(await getQuizAttemptReview(attempt.id));
+      } catch (reviewError) {
+        setLastAttemptReviewError(
+          reviewError instanceof Error
+            ? reviewError.message
+            : "Your score was saved, but the answer review could not load.",
+        );
+      } finally {
+        setLastAttemptReviewLoading(false);
+      }
       try {
         await refreshActivity();
       } catch (refreshError) {
@@ -1812,6 +2431,28 @@ function App() {
               ♧
             </button>
           </div>
+          <section className="home-primary-cta">
+            <div>
+              <span className="eyebrow">Make your next move</span>
+              <h2>Put your knowledge to the test.</h2>
+              <p>Start a published quiz or invite someone to a one-on-one battle.</p>
+            </div>
+            <div>
+              <Button onClick={() => navigate("quiz-setup")}>Start a quiz</Button>
+              <Button variant="secondary" onClick={() => navigate("battle")}>
+                Challenge someone
+              </Button>
+            </div>
+          </section>
+          <DailyGoalCard
+            status={billingStatus}
+            progress={gameProgress}
+            loading={billingStatusLoading}
+            error={billingStatusError}
+            onQuiz={() => navigate("quiz-setup")}
+            onBattle={() => navigate("battle")}
+            onPlans={() => navigate("subscription")}
+          />
           <section>
             <div className="section-title">
               <div>
@@ -1863,7 +2504,24 @@ function App() {
                 label="Average score"
               />
               <Stat icon="▤" value={String(papers.length)} label="Published papers" />
+              <Stat
+                icon="🔥"
+                value={
+                  gameProgressLoading
+                    ? "…"
+                    : gameProgress
+                      ? `${gameProgress.current_daily_streak} days`
+                      : "—"
+                }
+                label="Daily streak"
+                tone="hot"
+              />
             </div>
+            {gameProgressError && (
+              <p className="field-note" role="alert">
+                Daily streak unavailable: {gameProgressError}
+              </p>
+            )}
           </section>
           <section>
             <div className="section-title">
@@ -2025,7 +2683,7 @@ function App() {
               Loading published quizzes…
             </p>
           ) : prioritizedQuizSets.length ? (
-            <div className="course-list">
+            <div className="course-list quiz-catalog-grid">
               {prioritizedQuizSets.map((quiz) => (
                 <QuizCatalogCard
                   key={quiz.id}
@@ -2088,7 +2746,11 @@ function App() {
         <ResultsPage
           attempt={lastAttempt}
           paper={papers.find((paper) => paper.id === lastAttempt.paper_id)}
-          onRetry={() => navigate("quiz-setup")}
+          review={lastAttemptReview}
+          reviewLoading={lastAttemptReviewLoading}
+          reviewError={lastAttemptReviewError}
+          onRetry={() => void handleStartQuiz(lastAttempt.quiz_id ?? activeQuizSetId ?? undefined)}
+          onBrowse={() => navigate("quiz-setup")}
           onHistory={() => navigate("quiz-history")}
         />
       ) : (
@@ -2136,7 +2798,8 @@ function App() {
         <BattlePage
           userId={user.id}
           university={profile.university}
-          onActivityRefresh={() => void refreshActivity()}
+          onActivityRefresh={refreshActivity}
+          onBillingRefresh={refreshRimblyBillingStatus}
         />
       );
       break;
@@ -2148,25 +2811,88 @@ function App() {
             <span className="eyebrow">Community rankings</span>
             <h1>Climb the board.</h1>
             <p>
-              Earn 10 points per correct answer and 4 for a battle win (1 for a draw or loss). Win
-              streaks unlock status titles.
+              Earn 10 points per correct answer, plus 25 for a battle win or 8 for a draw. Build
+              consecutive wins to climb the title ladder.
             </p>
           </div>
           <div className="segment" aria-label="Leaderboard scope">
             <button
               className={leaderboardScope === "university" ? "active" : ""}
+              aria-pressed={leaderboardScope === "university"}
               onClick={() => setLeaderboardScope("university")}
             >
               My university
             </button>
             <button
               className={leaderboardScope === "all" ? "active" : ""}
+              aria-pressed={leaderboardScope === "all"}
               onClick={() => setLeaderboardScope("all")}
             >
               All universities
             </button>
           </div>
-          {leaders.length ? (
+          <div className="segment leaderboard-period" aria-label="Leaderboard period">
+            <button
+              className={leaderboardPeriod === "weekly" ? "active" : ""}
+              aria-pressed={leaderboardPeriod === "weekly"}
+              onClick={() => setLeaderboardPeriod("weekly")}
+            >
+              This week
+            </button>
+            <button
+              className={leaderboardPeriod === "all-time" ? "active" : ""}
+              aria-pressed={leaderboardPeriod === "all-time"}
+              onClick={() => setLeaderboardPeriod("all-time")}
+            >
+              All time
+            </button>
+          </div>
+          {leaderboardPeriod === "weekly" && <WeeklyResetNote />}
+          <section className="title-preview">
+            <div className="section-title">
+              <div>
+                <span>Earn your title</span>
+                <h2>Battle badges</h2>
+              </div>
+            </div>
+            <div className="title-preview-grid">
+              <article>
+                <span aria-hidden="true">✦</span>
+                <strong>Rookie</strong>
+                <small>Your starting title</small>
+              </article>
+              <article>
+                <span aria-hidden="true">⚔</span>
+                <strong>Contender</strong>
+                <small>Win your first battle</small>
+              </article>
+              <article>
+                <span aria-hidden="true">✧</span>
+                <strong>Elite</strong>
+                <small>Reach a 3-win streak</small>
+              </article>
+              <article>
+                <span aria-hidden="true">◆</span>
+                <strong>Grandmaster</strong>
+                <small>Reach a 5-win streak</small>
+              </article>
+              <article>
+                <span aria-hidden="true">★</span>
+                <strong>Campus Legend</strong>
+                <small>Reach a 10-win streak</small>
+              </article>
+            </div>
+          </section>
+          {leaderboardError && (
+            <p className="app-feedback" role="alert">
+              {leaderboardError}
+            </p>
+          )}
+          {leaderboardLoading ? (
+            <p className="field-note" role="status">
+              Loading {leaderboardPeriod === "weekly" ? "this week’s" : "all-time"} rankings…
+            </p>
+          ) : leaders.length ? (
             <div className="ranking-list">
               {leaders.map((leader, index) => (
                 <LeaderRow
@@ -2180,7 +2906,11 @@ function App() {
           ) : (
             <EmptyState
               title="No rankings yet"
-              text="Take a reviewed quiz or win a battle to earn points and appear on the board."
+              text={
+                leaderboardPeriod === "weekly"
+                  ? "Play a quiz or battle this week to earn a place on the weekly board. It resets every Monday."
+                  : "Take a reviewed quiz or win a battle to earn points and appear on the all-time board."
+              }
               action="Find a quiz"
               onAction={() => navigate("quiz-setup")}
             />
@@ -2197,6 +2927,12 @@ function App() {
             <h1>{profile.full_name}</h1>
             <p>{user.email}</p>
           </div>
+          <GameProgressPanel
+            progress={gameProgress}
+            loading={gameProgressLoading}
+            error={gameProgressError}
+            isPro={Boolean(billingStatus?.is_pro)}
+          />
           <form
             className="form-stack profile-edit"
             onSubmit={(event) => void handleSaveProfile(event)}
@@ -2298,7 +3034,7 @@ function App() {
                 Loading published quizzes…
               </p>
             ) : prioritizedQuizSets.length ? (
-              <div className="course-list">
+              <div className="course-list quiz-catalog-grid">
                 {prioritizedQuizSets.map((quiz) => (
                   <QuizCatalogCard
                     key={quiz.id}
@@ -2340,6 +3076,22 @@ function App() {
               <h2>Quick links</h2>
             </div>
             <div className="profile-menu">
+              <button onClick={() => navigate("subscription")}>
+                <span className="profile-menu-icon" aria-hidden="true">
+                  ✦
+                </span>
+                <span className="profile-menu-copy">
+                  <strong>Rimbly Pro</strong>
+                  <small>
+                    {billingStatus?.is_pro
+                      ? "Manage your plan and view detailed analytics"
+                      : "See plans, daily limits, and Pro benefits"}
+                  </small>
+                </span>
+                <span className="profile-menu-arrow" aria-hidden="true">
+                  ›
+                </span>
+              </button>
               <button onClick={() => navigate("contribute")}>
                 <span className="profile-menu-icon" aria-hidden="true">
                   ↑
@@ -2397,6 +3149,23 @@ function App() {
             </div>
           </section>
         </>
+      );
+      break;
+    case "subscription":
+      title = "Rimbly Pro";
+      content = (
+        <SubscriptionPage
+          status={billingStatus}
+          loading={billingStatusLoading}
+          error={billingStatusError}
+          paymentReference={new URLSearchParams(window.location.search).get("payment")}
+          checkoutBusy={checkoutBusy}
+          attempts={attempts}
+          papers={papers}
+          courses={courses}
+          onRefresh={() => void refreshRimblyBillingStatus()}
+          onChoosePlan={(planId) => void startProCheckout(planId)}
+        />
       );
       break;
     case "contribute":
@@ -3716,9 +4485,19 @@ function AdminWorkspace({
   );
 }
 
-function Stat({ icon, value, label }: { icon: string; value: string; label: string }) {
+function Stat({
+  icon,
+  value,
+  label,
+  tone,
+}: {
+  icon: string;
+  value: string;
+  label: string;
+  tone?: "hot";
+}) {
   return (
-    <div className="stat-card">
+    <div className={`stat-card ${tone ?? ""}`}>
       <span>{icon}</span>
       <b>{value}</b>
       <small>{label}</small>
@@ -4789,11 +5568,37 @@ function PracticePage({
   onNavigate: (route: Route) => void;
 }) {
   const [search, setSearch] = useState("");
-  const displayed = courses.filter((course) =>
-    `${course.code} ${course.title} ${course.department ?? ""} ${course.university}`
-      .toLowerCase()
-      .includes(search.toLowerCase()),
-  );
+  const [level, setLevel] = useState("");
+  const [faculty, setFaculty] = useState("");
+  const [department, setDepartment] = useState("");
+  const levels = Array.from(
+    new Set(courses.map((course) => course.level).filter((value): value is string => !!value)),
+  ).sort((a, b) => a.localeCompare(b));
+  const faculties = Array.from(
+    new Set(courses.map((course) => course.faculty).filter((value): value is string => !!value)),
+  ).sort((a, b) => a.localeCompare(b));
+  const departments = Array.from(
+    new Set(courses.map((course) => course.department).filter((value): value is string => !!value)),
+  ).sort((a, b) => a.localeCompare(b));
+  const displayed = courses.filter((course) => {
+    const matchesSearch =
+      `${course.code} ${course.title} ${course.department ?? ""} ${course.university}`
+        .toLowerCase()
+        .includes(search.toLowerCase());
+    return (
+      matchesSearch &&
+      (!level || course.level === level) &&
+      (!faculty || course.faculty === faculty) &&
+      (!department || course.department === department)
+    );
+  });
+  const hasFilters = !!(search || level || faculty || department);
+  const clearFilters = () => {
+    setSearch("");
+    setLevel("");
+    setFaculty("");
+    setDepartment("");
+  };
   return (
     <>
       <div className="page-head">
@@ -4813,13 +5618,53 @@ function PracticePage({
           placeholder="Search course code, title, department, or university"
         />
       </label>
+      <div className="practice-filters" aria-label="Filter courses">
+        <label>
+          <span>Level</span>
+          <select value={level} onChange={(event) => setLevel(event.target.value)}>
+            <option value="">All levels</option>
+            {levels.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Faculty</span>
+          <select value={faculty} onChange={(event) => setFaculty(event.target.value)}>
+            <option value="">All faculties</option>
+            {faculties.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Department</span>
+          <select value={department} onChange={(event) => setDepartment(event.target.value)}>
+            <option value="">All departments</option>
+            {departments.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        {hasFilters && (
+          <button type="button" className="clear-filters" onClick={clearFilters}>
+            Clear filters
+          </button>
+        )}
+      </div>
       <section>
         <div className="section-title">
           <div>
             <span>
               {displayed.length} {displayed.length === 1 ? "course" : "courses"}
             </span>
-            <h2>All departments and universities</h2>
+            <h2>Courses in the library</h2>
           </div>
         </div>
         {displayed.length ? (
@@ -4838,11 +5683,11 @@ function PracticePage({
             title={courses.length ? "No matching courses" : "The library is empty"}
             text={
               courses.length
-                ? "Try a different search term."
+                ? "Try a different search term or adjust your filters."
                 : "Ask an administrator to add courses to the study library."
             }
-            action={courses.length ? "Clear search" : "Contribute a paper"}
-            onAction={() => (courses.length ? setSearch("") : onNavigate("contribute"))}
+            action={courses.length ? "Clear filters" : "Contribute a paper"}
+            onAction={() => (courses.length ? clearFilters() : onNavigate("contribute"))}
           />
         )}
       </section>
@@ -4854,10 +5699,12 @@ function BattlePage({
   userId,
   university,
   onActivityRefresh,
+  onBillingRefresh,
 }: {
   userId: string;
   university: string | null;
-  onActivityRefresh: () => void;
+  onActivityRefresh: () => Promise<void>;
+  onBillingRefresh: () => Promise<void>;
 }) {
   const [quizzes, setQuizzes] = useState<QuizSet[]>([]);
   const [opponents, setOpponents] = useState<Awaited<ReturnType<typeof getBattleOpponents>>>([]);
@@ -4870,10 +5717,56 @@ function BattlePage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const linkedChallengeId = new URLSearchParams(window.location.search).get("challenge");
+  const previousBattlesRef = useRef<Battle[]>([]);
 
   const refreshBattles = async () => {
     setBattles(await getBattles());
   };
+
+  const refreshBattlesAfterAction = async (action: string) => {
+    try {
+      await refreshBattles();
+    } catch (refreshError) {
+      setError(
+        `${action}, but the battle list could not refresh: ${refreshError instanceof Error ? refreshError.message : "unknown error"}`,
+      );
+    }
+  };
+
+  const refreshActivitySummary = async () => {
+    try {
+      await onActivityRefresh();
+    } catch (refreshError) {
+      setError(
+        `Battle result saved, but your progress could not refresh: ${refreshError instanceof Error ? refreshError.message : "unknown error"}`,
+      );
+    }
+  };
+
+  const copyChallengeLink = async (battleId: string) => {
+    const inviteUrl = new URL(window.location.href);
+    inviteUrl.searchParams.set("route", "battle");
+    inviteUrl.searchParams.set("challenge", battleId);
+    try {
+      await navigator.clipboard.writeText(inviteUrl.toString());
+      setError(null);
+      setNotice("Challenge link copied. Share it so your classmate can open the pending match.");
+    } catch (copyError) {
+      setError(
+        copyError instanceof Error
+          ? `The challenge is ready, but the link could not be copied: ${copyError.message}`
+          : "The challenge is ready, but this browser could not copy the link.",
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!linkedChallengeId || !battles.length) return;
+    document
+      .getElementById(`battle-${linkedChallengeId}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [battles.length, linkedChallengeId]);
 
   useEffect(() => {
     let active = true;
@@ -4881,6 +5774,7 @@ function BattlePage({
       .then(([nextQuizzes, nextBattles]) => {
         if (!active) return;
         setQuizzes(nextQuizzes);
+        previousBattlesRef.current = nextBattles;
         setBattles(nextBattles);
       })
       .catch((loadError: unknown) => {
@@ -4892,7 +5786,17 @@ function BattlePage({
     const interval = window.setInterval(() => {
       void getBattles()
         .then((result) => {
-          if (active) setBattles(result);
+          if (!active) return;
+          const newlyCompleted = result.some(
+            (battle) =>
+              battle.status === "completed" &&
+              previousBattlesRef.current.some(
+                (previous) => previous.id === battle.id && previous.status !== "completed",
+              ),
+          );
+          previousBattlesRef.current = result;
+          setBattles(result);
+          if (newlyCompleted) void refreshActivitySummary();
         })
         .catch((refreshError: unknown) => {
           if (active)
@@ -4933,10 +5837,10 @@ function BattlePage({
     setNotice(null);
     try {
       await respondToBattle(battleId, accept);
-      await refreshBattles();
       setNotice(
         accept ? "Challenge accepted. You can start the shared quiz now." : "Challenge declined.",
       );
+      await refreshBattlesAfterAction(accept ? "Challenge accepted" : "Challenge declined");
     } catch (actionError) {
       setError(
         actionError instanceof Error ? actionError.message : "Could not respond to challenge.",
@@ -4956,12 +5860,33 @@ function BattlePage({
     setNotice(null);
     try {
       await createBattle(quizId, opponentId);
-      await refreshBattles();
+      await refreshBattlesAfterAction("Challenge sent");
+      await onBillingRefresh();
       setNotice("Challenge sent. Your opponent will get the same questions when they accept.");
     } catch (actionError) {
       setError(
         actionError instanceof Error ? actionError.message : "Could not send this challenge.",
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rematch = async (battle: Battle) => {
+    const opponentId =
+      battle.challenger_id === userId ? battle.challenged_id : battle.challenger_id;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await createBattle(battle.quiz_id, opponentId);
+      await refreshBattlesAfterAction("Rematch sent");
+      await onBillingRefresh();
+      setNotice(
+        `Rematch requested with ${battle.challenger_id === userId ? battle.challenged_name : battle.challenger_name}.`,
+      );
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Could not send this rematch.");
     } finally {
       setBusy(false);
     }
@@ -5000,8 +5925,8 @@ function BattlePage({
               ? `You won ${result.points_earned} points! Your current win streak is ${result.your_streak}.`
               : `Battle complete. You earned ${result.points_earned} ${result.points_earned === 1 ? "point" : "points"}. Check the results below.`,
       );
-      await refreshBattles();
-      onActivityRefresh();
+      await refreshBattlesAfterAction("Battle answers saved");
+      await refreshActivitySummary();
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : "Could not submit battle answers.",
@@ -5030,6 +5955,7 @@ function BattlePage({
                   type="button"
                   key={`${question.id}-${index}`}
                   className={answers[question.id] === index ? "selected" : ""}
+                  aria-pressed={answers[question.id] === index}
                   onClick={() => setAnswers((current) => ({ ...current, [question.id]: index }))}
                 >
                   <i>{String.fromCharCode(65 + index)}</i>
@@ -5061,8 +5987,8 @@ function BattlePage({
         <span className="eyebrow">One-on-one battle arena</span>
         <h1>Challenge a classmate.</h1>
         <p>
-          Same reviewed quiz for both players. Correct answers decide the winner, then faster time.
-          Wins build streaks, points, and titles.
+          Same reviewed quiz for both players. Earn 10 points per correct answer, plus 25 for a win
+          or 8 for a draw. Correct answers decide the winner, then faster time.
         </p>
       </div>
       {error && (
@@ -5079,6 +6005,7 @@ function BattlePage({
         <div>
           <span className="eyebrow">Your university</span>
           <h2>{university || "Complete your university profile to find players"}</h2>
+          <p>Challenges stay open until your classmate responds, even if they’re away.</p>
         </div>
         <label>
           <span>Shared quiz</span>
@@ -5119,14 +6046,14 @@ function BattlePage({
             ))}
           </div>
         ) : (
-          <p className="field-note">No active players found at your university.</p>
+          <p className="field-note">No players found. Try searching by your classmate’s name.</p>
         )}
       </section>
       <section className="battle-matches">
         <div className="admin-section-heading">
           <div>
-            <span className="eyebrow">Live and recent</span>
-            <h2>Your challenges</h2>
+            <span className="eyebrow">Your activity</span>
+            <h2>Recent battles</h2>
           </div>
           <Button variant="secondary" disabled={busy} onClick={() => void refreshBattles()}>
             Refresh
@@ -5138,8 +6065,23 @@ function BattlePage({
             const outgoing = battle.challenger_id === userId && battle.status === "pending";
             const otherName =
               battle.challenger_id === userId ? battle.challenged_name : battle.challenger_name;
+            const statusLabel = incoming
+              ? "Your turn"
+              : outgoing
+                ? "Waiting for response"
+                : battle.status === "active"
+                  ? "In progress"
+                  : battle.status === "completed"
+                    ? "Completed"
+                    : battle.status === "declined"
+                      ? "Declined"
+                      : "Cancelled";
             return (
-              <article className="battle-match-row" key={battle.id}>
+              <article
+                className={`battle-match-row ${battle.id === linkedChallengeId ? "battle-invite-target" : ""}`}
+                id={`battle-${battle.id}`}
+                key={battle.id}
+              >
                 <div>
                   <strong>{battle.quiz_title}</strong>
                   <small>
@@ -5150,17 +6092,23 @@ function BattlePage({
                 </div>
                 <span
                   className={`badge ${battle.status === "completed" ? "badge-purple" : "badge-amber"}`}
+                  aria-label={`Battle status: ${statusLabel}`}
                 >
-                  {battle.status}
+                  {statusLabel}
                 </span>
                 {incoming && (
                   <>
-                    <Button disabled={busy} onClick={() => void respond(battle.id, true)}>
+                    <Button
+                      disabled={busy}
+                      ariaLabel={`Accept challenge from ${otherName}`}
+                      onClick={() => void respond(battle.id, true)}
+                    >
                       Accept
                     </Button>
                     <Button
                       variant="secondary"
                       disabled={busy}
+                      ariaLabel={`Decline challenge from ${otherName}`}
                       onClick={() => void respond(battle.id, false)}
                     >
                       Decline
@@ -5168,49 +6116,85 @@ function BattlePage({
                   </>
                 )}
                 {outgoing && (
-                  <Button
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={async () => {
-                      setBusy(true);
-                      setError(null);
-                      try {
-                        await cancelBattle(battle.id);
-                        await refreshBattles();
-                      } catch (cancelError) {
-                        setError(
-                          cancelError instanceof Error
-                            ? cancelError.message
-                            : "Could not cancel this challenge.",
-                        );
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    Cancel
-                  </Button>
+                  <>
+                    <Button
+                      variant="secondary"
+                      ariaLabel={`Copy invite link for ${otherName}`}
+                      onClick={() => void copyChallengeLink(battle.id)}
+                    >
+                      Copy invite link
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          await cancelBattle(battle.id);
+                          await refreshBattlesAfterAction("Challenge cancelled");
+                        } catch (cancelError) {
+                          setError(
+                            cancelError instanceof Error
+                              ? cancelError.message
+                              : "Could not cancel this challenge.",
+                          );
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </>
                 )}
                 {battle.status === "active" && !battle.your_submission && (
-                  <Button disabled={busy} onClick={() => void startBattle(battle.id)}>
+                  <Button
+                    disabled={busy}
+                    ariaLabel={`Play battle with ${otherName}`}
+                    onClick={() => void startBattle(battle.id)}
+                  >
                     Play
                   </Button>
                 )}
                 {battle.status === "active" && battle.your_submission && (
-                  <small>Submitted · waiting for your opponent</small>
+                  <small>
+                    {battle.opponent_submission
+                      ? "Your opponent has submitted · waiting for results"
+                      : "You’ve submitted · waiting for your opponent"}
+                  </small>
                 )}
+                {battle.status === "active" &&
+                  !battle.your_submission &&
+                  battle.opponent_submission && (
+                    <small>Your opponent has submitted · it’s your turn</small>
+                  )}
                 {battle.status === "completed" && (
-                  <div className="battle-match-result">
-                    <strong>
-                      {battle.is_draw ? "Draw" : battle.winner_id === userId ? "Victory" : "Defeat"}
-                    </strong>
-                    <small>
-                      You {battle.your_correct_count ?? 0} correct in{" "}
-                      {(battle.your_duration_seconds ?? 0).toFixed(2)}s{" · "}
-                      opponent {battle.opponent_correct_count ?? 0} correct in{" "}
-                      {(battle.opponent_duration_seconds ?? 0).toFixed(2)}s
-                    </small>
-                  </div>
+                  <>
+                    <div className="battle-match-result">
+                      <strong>
+                        {battle.is_draw
+                          ? "Draw"
+                          : battle.winner_id === userId
+                            ? "Victory"
+                            : "Defeat"}
+                      </strong>
+                      <small>
+                        You {battle.your_correct_count ?? 0} correct in{" "}
+                        {(battle.your_duration_seconds ?? 0).toFixed(2)}s{" · "}
+                        opponent {battle.opponent_correct_count ?? 0} correct in{" "}
+                        {(battle.opponent_duration_seconds ?? 0).toFixed(2)}s
+                      </small>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      disabled={busy}
+                      ariaLabel={`Rematch ${otherName} in ${battle.quiz_title}`}
+                      onClick={() => void rematch(battle)}
+                    >
+                      Rematch
+                    </Button>
+                  </>
                 )}
               </article>
             );
@@ -5512,19 +6496,49 @@ function QuizPage({
   const question = questions[index];
   const options = Array.isArray(question.options) ? question.options : [];
   const answered = Object.keys(answers).length;
+  const progressPercent = ((index + 1) / questions.length) * 100;
   return (
     <div className="focus-page">
       <header>
         <span>
           Question {index + 1} of {questions.length}
         </span>
-        <div className="progress">
-          <span style={{ width: `${(answered / questions.length) * 100}%` }} />
+        <div
+          className="progress"
+          role="progressbar"
+          aria-label="Quiz question progress"
+          aria-valuemin={1}
+          aria-valuemax={questions.length}
+          aria-valuenow={index + 1}
+        >
+          <span style={{ width: `${progressPercent}%` }} />
         </div>
-        <button className="btn btn-secondary" type="button" onClick={() => window.history.back()}>
+        <button
+          className="btn btn-secondary"
+          type="button"
+          onClick={() => {
+            if (!answered || window.confirm("Exit this quiz? Your answers will not be saved.")) {
+              window.history.back();
+            }
+          }}
+        >
           Exit
         </button>
       </header>
+      <nav className="quiz-question-nav" aria-label="Jump to question">
+        {questions.map((item, questionIndex) => (
+          <button
+            type="button"
+            key={item.id}
+            className={`${questionIndex === index ? "current" : ""} ${answers[item.id] !== undefined ? "answered" : ""}`}
+            aria-label={`Question ${questionIndex + 1}${answers[item.id] !== undefined ? ", answered" : ", unanswered"}`}
+            aria-current={questionIndex === index ? "step" : undefined}
+            onClick={() => setIndex(questionIndex)}
+          >
+            {questionIndex + 1}
+          </button>
+        ))}
+      </nav>
       <main className="question-wrap">
         <span className="badge badge-purple">{question.position}</span>
         <h1>{question.prompt}</h1>
@@ -5534,6 +6548,7 @@ function QuizPage({
               type="button"
               key={`${question.id}-${choice}`}
               className={answers[question.id] === choice ? "selected" : ""}
+              aria-pressed={answers[question.id] === choice}
               onClick={() => setAnswer(question.id, choice)}
             >
               <i>{String.fromCharCode(65 + choice)}</i>
@@ -5554,19 +6569,20 @@ function QuizPage({
             </Button>
           )}
           {index < questions.length - 1 ? (
-            <Button
-              disabled={answers[question.id] === undefined}
-              onClick={() => setIndex(index + 1)}
-            >
-              Next
-            </Button>
+            <Button onClick={() => setIndex(index + 1)}>Next</Button>
           ) : (
-            <Button disabled={answered === 0 || busy} onClick={onSubmit}>
+            <Button disabled={answered !== questions.length || busy} onClick={onSubmit}>
               {busy ? "Saving…" : "Submit answers"}
             </Button>
           )}
         </div>
       </footer>
+      {answered < questions.length && (
+        <p className="quiz-unanswered-note" role="status">
+          {questions.length - answered}{" "}
+          {questions.length - answered === 1 ? "question" : "questions"} left unanswered.
+        </p>
+      )}
     </div>
   );
 }
@@ -5574,14 +6590,33 @@ function QuizPage({
 function ResultsPage({
   attempt,
   paper,
+  review,
+  reviewLoading,
+  reviewError,
   onRetry,
+  onBrowse,
   onHistory,
 }: {
   attempt: QuizAttempt;
   paper?: Paper;
+  review: QuizAttemptReviewItem[];
+  reviewLoading: boolean;
+  reviewError: string | null;
   onRetry: () => void;
+  onBrowse: () => void;
   onHistory: () => void;
 }) {
+  const nextStep =
+    attempt.score_percent >= 80
+      ? "Great accuracy. Try another quiz in this course to check that you can repeat the result."
+      : attempt.score_percent >= 60
+        ? "Good foundation. Review the questions below, then retry to improve your score."
+        : "Take it one question at a time. Review the answers below, then practise this quiz again.";
+  const improvement =
+    attempt.previous_score_percent === undefined
+      ? null
+      : attempt.score_percent - attempt.previous_score_percent;
+
   return (
     <>
       <div className="result-hero">
@@ -5602,13 +6637,94 @@ function ResultsPage({
         {attempt.points_earned !== undefined && (
           <div className="xp-pill">{attempt.points_earned} points earned</div>
         )}
+        {improvement !== null && (
+          <p className="score-comparison" role="status">
+            {improvement > 0
+              ? `You beat your last score by ${improvement} percentage points.`
+              : improvement === 0
+                ? "You matched your last score. Keep building on it."
+                : `Your last score was ${attempt.previous_score_percent}%. Keep practising to turn missed questions into progress.`}
+          </p>
+        )}
       </div>
       <div className="result-actions">
-        <Button onClick={onRetry}>Try another quiz</Button>
+        <Button onClick={onRetry}>Retry this quiz</Button>
+        <Button variant="secondary" onClick={onBrowse}>
+          Choose another quiz
+        </Button>
         <Button variant="secondary" onClick={onHistory}>
           View quiz history
         </Button>
       </div>
+      <section className="quiz-next-step">
+        <span className="eyebrow">Your next step</span>
+        <p>{nextStep}</p>
+      </section>
+      <section className="quiz-review">
+        <div className="section-title">
+          <div>
+            <span>Learn from every attempt</span>
+            <h2>Answer review</h2>
+          </div>
+        </div>
+        {reviewLoading ? (
+          <p className="field-note" role="status">
+            Loading your answer review…
+          </p>
+        ) : reviewError ? (
+          <p className="app-feedback" role="alert">
+            Answer review is unavailable: {reviewError}
+          </p>
+        ) : review.length ? (
+          <div className="quiz-review-list">
+            {review.map((item) => {
+              const isCorrect = item.selected_index === item.correct_index;
+              return (
+                <article
+                  className={`quiz-review-item ${isCorrect ? "correct" : "incorrect"}`}
+                  key={item.id}
+                >
+                  <div className="quiz-review-heading">
+                    <span>Question {item.position}</span>
+                    <strong>{isCorrect ? "Correct" : "Review this one"}</strong>
+                  </div>
+                  <h3>{item.prompt}</h3>
+                  <p>
+                    Your answer:{" "}
+                    <strong>{item.options[item.selected_index] ?? "Not answered"}</strong>
+                  </p>
+                  {!isCorrect && (
+                    <p>
+                      Correct answer: <strong>{item.options[item.correct_index]}</strong>
+                    </p>
+                  )}
+                  <ol className="quiz-review-options">
+                    {item.options.map((option, optionIndex) => (
+                      <li
+                        key={`${item.id}-${optionIndex}`}
+                        className={[
+                          optionIndex === item.correct_index ? "correct-option" : "",
+                          optionIndex === item.selected_index && !isCorrect ? "selected-wrong" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <span>{String.fromCharCode(65 + optionIndex)}</span>
+                        <span>{option}</span>
+                        {optionIndex === item.correct_index && <strong>Correct</strong>}
+                        {optionIndex === item.selected_index && <small>Your answer</small>}
+                      </li>
+                    ))}
+                  </ol>
+                  {item.explanation && <small>{item.explanation}</small>}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="field-note">No answer review is available for this attempt.</p>
+        )}
+      </section>
     </>
   );
 }
@@ -5646,7 +6762,11 @@ function LeaderRow({ leader, rank, isMe }: { leader: Leader; rank: number; isMe:
           .toUpperCase()}
       </span>
       <span>
-        <strong>{leader.full_name || "Student"}</strong>
+        <strong>
+          {leader.full_name || "Student"}
+          {isMe && rank <= 10 && <em>Top 10</em>}
+          {leader.is_pro && <em className="pro-flair">Pro</em>}
+        </strong>
         <small>
           {leader.university ?? "University not set"} · {leader.title || "Rookie"} ·{" "}
           {leader.quizzes_completed} quizzes
@@ -5654,6 +6774,145 @@ function LeaderRow({ leader, rank, isMe }: { leader: Leader; rank: number; isMe:
         </small>
       </span>
       <b>{leader.points.toLocaleString()} pts</b>
+    </div>
+  );
+}
+
+function GameProgressPanel({
+  progress,
+  loading,
+  error,
+  isPro,
+}: {
+  progress: GameProgress | null;
+  loading: boolean;
+  error: string | null;
+  isPro: boolean;
+}) {
+  const badgeDefinitions = [
+    { id: "first_win", name: "First Victory", description: "Win your first battle", icon: "⚔" },
+    {
+      id: "perfect_score",
+      name: "Perfect Score",
+      description: "Answer every quiz question correctly",
+      icon: "✓",
+    },
+    {
+      id: "speed_demon",
+      name: "Speed Demon",
+      description: "Perfect score at 10 seconds per question or faster",
+      icon: "↯",
+    },
+    { id: "daily_7", name: "7-day Scholar", description: "Practice 7 days in a row", icon: "🔥" },
+  ] as const;
+  const earnedBadgeIds = new Set(progress?.badges.map((badge) => badge.badge_id) ?? []);
+
+  return (
+    <section className="game-progress-panel">
+      <div className="section-title">
+        <div>
+          <span>Your progress</span>
+          <h2>{loading ? "Loading rewards…" : (progress?.title ?? "Game progress")}</h2>
+        </div>
+        {progress && (
+          <span className="badge badge-purple">{progress.points.toLocaleString()} pts</span>
+        )}
+        {isPro && <span className="badge badge-purple pro-flair">PRO SCHOLAR</span>}
+      </div>
+      {error ? (
+        <p className="app-feedback" role="alert">
+          Game progress could not load: {error}
+        </p>
+      ) : loading ? (
+        <p className="field-note" role="status">
+          Loading your streaks and badges…
+        </p>
+      ) : progress ? (
+        <>
+          <div className="game-progress-stats">
+            <div>
+              <strong>{progress.current_daily_streak} days</strong>
+              <small>Daily streak · best {progress.best_daily_streak} days</small>
+            </div>
+            <div>
+              <strong>{progress.current_win_streak}</strong>
+              <small>Battle win streak</small>
+            </div>
+            <div>
+              <strong>{progress.battle_wins}</strong>
+              <small>Battle wins</small>
+            </div>
+            <div>
+              <strong>{progress.quizzes_completed}</strong>
+              <small>Quizzes completed</small>
+            </div>
+          </div>
+          <TitleProgress progress={progress} />
+          <div className="game-badge-list" aria-label="Badges">
+            {badgeDefinitions.map((badge) => {
+              const isEarned = earnedBadgeIds.has(badge.id);
+              const earnedAt = progress?.badges.find(
+                (item) => item.badge_id === badge.id,
+              )?.earned_at;
+              return (
+                <article className={isEarned ? "earned" : "locked"} key={badge.id}>
+                  <span aria-hidden="true">{badge.icon}</span>
+                  <div>
+                    <strong>{badge.name}</strong>
+                    <small>
+                      {isEarned && earnedAt
+                        ? `Earned ${new Date(earnedAt).toLocaleDateString()}`
+                        : badge.description}
+                    </small>
+                  </div>
+                  {isEarned && <b aria-label="Earned">✓</b>}
+                </article>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function TitleProgress({ progress }: { progress: GameProgress }) {
+  const milestones = [
+    { title: "Contender", wins: 1 },
+    { title: "Elite", wins: 3 },
+    { title: "Grandmaster", wins: 5 },
+    { title: "Campus Legend", wins: 10 },
+  ];
+  const nextMilestone = milestones.find((milestone) => progress.best_win_streak < milestone.wins);
+  const progressPercent = nextMilestone
+    ? Math.min(100, (progress.best_win_streak / nextMilestone.wins) * 100)
+    : 100;
+
+  return (
+    <div className="title-progress">
+      <div>
+        <strong>
+          {nextMilestone ? `Next title: ${nextMilestone.title}` : "Top title unlocked"}
+        </strong>
+        <span>
+          {nextMilestone
+            ? `${Math.max(0, nextMilestone.wins - progress.best_win_streak)} more best-streak ${
+                nextMilestone.wins - progress.best_win_streak === 1 ? "win" : "wins"
+              } needed`
+            : "You’ve reached Campus Legend"}
+        </span>
+      </div>
+      <div
+        className="title-progress-track"
+        role="progressbar"
+        aria-label={nextMilestone ? `Progress to ${nextMilestone.title}` : "Title ladder complete"}
+        aria-valuemin={0}
+        aria-valuemax={nextMilestone?.wins ?? 10}
+        aria-valuenow={Math.min(progress.best_win_streak, nextMilestone?.wins ?? 10)}
+      >
+        <span style={{ width: `${progressPercent}%` }} />
+      </div>
+      <small>Titles are earned by setting a new best consecutive battle-win streak.</small>
     </div>
   );
 }
