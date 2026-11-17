@@ -1,7 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { getRimblyPlan } from "../../src/lib/monetization";
 
 type CheckoutRequest = IncomingMessage & {
   body?: unknown;
@@ -28,7 +27,12 @@ export default async function handler(request: CheckoutRequest, response: Server
       ? (request.body as Record<string, unknown>)
       : null;
   const planId = typeof body?.planId === "string" ? body.planId : "";
-  const plan = getRimblyPlan(planId);
+  const plans: Record<string, { id: string; priceKobo: number }> = {
+    weekly: { id: "weekly", priceKobo: 50_000 },
+    monthly: { id: "monthly", priceKobo: 250_000 },
+    semester: { id: "semester", priceKobo: 800_000 },
+  };
+  const plan = plans[planId];
   if (!plan) return respond(response, 400, { error: "Choose a valid Rimbly Pro plan." });
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL;

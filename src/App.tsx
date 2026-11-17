@@ -809,6 +809,195 @@ function QuizCatalogCard({
   );
 }
 
+function QuizSetupPage({
+  quizzes,
+  courses,
+  loading,
+  busy,
+  onTake,
+  onReadSource,
+  onRefresh,
+  onBrowseCourses,
+}: {
+  quizzes: QuizSet[];
+  courses: Course[];
+  loading: boolean;
+  busy: boolean;
+  onTake: (quizId: string) => void;
+  onReadSource: (path: string, title: string) => void;
+  onRefresh: () => void;
+  onBrowseCourses: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [level, setLevel] = useState("");
+  const [faculty, setFaculty] = useState("");
+  const [department, setDepartment] = useState("");
+  const quizEntries = useMemo(
+    () =>
+      quizzes.map((quiz) => {
+        const courseCode = normalizeCatalogLabel(quiz.course_code);
+        const matchingCourses = courseCode
+          ? courses.filter((course) => normalizeCatalogLabel(course.code) === courseCode)
+          : [];
+        const course =
+          matchingCourses.find(
+            (item) =>
+              normalizeCatalogLabel(item.university) ===
+              normalizeCatalogLabel(quiz.university ?? quiz.audience_university),
+          ) ?? matchingCourses[0];
+        const departments = [quiz.audience_department, quiz.course_department, course?.department]
+          .filter((value): value is string => Boolean(value))
+          .filter((value, index, values) => values.indexOf(value) === index);
+        const levels = [quiz.audience_level, course?.level]
+          .filter((value): value is string => Boolean(value))
+          .filter((value, index, values) => values.indexOf(value) === index);
+        return { quiz, course, departments, levels };
+      }),
+    [quizzes, courses],
+  );
+  const levels = Array.from(new Set(quizEntries.flatMap((entry) => entry.levels))).sort((a, b) =>
+    a.localeCompare(b),
+  );
+  const faculties = Array.from(
+    new Set(courses.map((course) => course.faculty).filter((value): value is string => !!value)),
+  ).sort((a, b) => a.localeCompare(b));
+  const departments = Array.from(
+    new Set(quizEntries.flatMap((entry) => entry.departments)),
+  ).sort((a, b) => a.localeCompare(b));
+  const displayed = quizEntries.filter(({ quiz, course, levels: quizLevels, departments: quizDepartments }) => {
+    const matchesSearch = `${quiz.course_code ?? ""} ${quiz.course_title ?? ""} ${quiz.title} ${quiz.description} ${quiz.university ?? ""} ${quiz.audience_university ?? ""} ${quizDepartments.join(" ")}`
+      .toLowerCase()
+      .includes(search.trim().toLowerCase());
+    return (
+      matchesSearch &&
+      (!level || quizLevels.includes(level)) &&
+      (!faculty || course?.faculty === faculty) &&
+      (!department || quizDepartments.includes(department))
+    );
+  });
+  const hasFilters = Boolean(search || level || faculty || department);
+  const clearFilters = () => {
+    setSearch("");
+    setLevel("");
+    setFaculty("");
+    setDepartment("");
+  };
+
+  return (
+    <>
+      <div className="page-head compact">
+        <span className="eyebrow">Published quizzes</span>
+        <h1>Choose your challenge.</h1>
+        <p>
+          Your department and university matches appear first, but all published quizzes remain
+          available. A moderator approves each question before it goes live.
+        </p>
+      </div>
+      <label className="search-field">
+        <span aria-hidden="true">⌕</span>
+        <input
+          aria-label="Search quizzes by course code, title, department, or university"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search course code, title, department, or university"
+        />
+      </label>
+      <div className="practice-filters" aria-label="Filter quizzes">
+        <label>
+          <span>Level</span>
+          <select value={level} onChange={(event) => setLevel(event.target.value)}>
+            <option value="">All levels</option>
+            {levels.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Faculty</span>
+          <select value={faculty} onChange={(event) => setFaculty(event.target.value)}>
+            <option value="">All faculties</option>
+            {faculties.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Department</span>
+          <select value={department} onChange={(event) => setDepartment(event.target.value)}>
+            <option value="">All departments</option>
+            {departments.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        {hasFilters && (
+          <button type="button" className="clear-filters" onClick={clearFilters}>
+            Clear filters
+          </button>
+        )}
+      </div>
+      <section>
+        <div className="section-title">
+          <div>
+            <span>
+              {displayed.length} {displayed.length === 1 ? "quiz" : "quizzes"}
+            </span>
+            <h2>Published quizzes</h2>
+          </div>
+        </div>
+        {loading ? (
+          <p className="field-note" role="status">
+            Loading published quizzes…
+          </p>
+        ) : displayed.length ? (
+          <div className="course-list quiz-catalog-grid">
+            {displayed.map(({ quiz }) => (
+              <QuizCatalogCard
+                key={quiz.id}
+                quiz={quiz}
+                busy={busy}
+                onTake={() => onTake(quiz.id)}
+                onReadSource={() => {
+                  if (quiz.source_file_path) {
+                    onReadSource(
+                      quiz.source_file_path,
+                      `Original source: ${quiz.title}`,
+                    );
+                  }
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title={hasFilters ? "No matching quizzes" : "No published quizzes found"}
+            text={
+              hasFilters
+                ? "Try changing or clearing your filters to see more quizzes."
+                : "A quiz appears after a reviewer approves at least one question with an answer key."
+            }
+            action={hasFilters ? "Clear filters" : "Browse past questions"}
+            onAction={hasFilters ? clearFilters : onBrowseCourses}
+          />
+        )}
+        {!loading && !quizzes.length && !hasFilters && (
+          <div className="admin-actions">
+            <Button variant="secondary" disabled={loading} onClick={onRefresh}>
+              Refresh quizzes
+            </Button>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
 function DailyGoalCard({
   status,
   progress,
@@ -1027,7 +1216,7 @@ function SubscriptionPage({
       )}
       {error && (
         <p className="app-feedback" role="alert">
-          Subscription status could not load: {error}
+          Billing request failed: {error}
         </p>
       )}
       <section className="billing-current-plan">
@@ -1305,10 +1494,17 @@ function App() {
         },
         body: JSON.stringify({ planId }),
       });
-      const result = (await response.json()) as {
-        checkoutUrl?: unknown;
-        error?: unknown;
-      };
+      const responseText = await response.text();
+      let result: { checkoutUrl?: unknown; error?: unknown } | null = null;
+      try {
+        result = JSON.parse(responseText) as { checkoutUrl?: unknown; error?: unknown };
+      } catch {
+        throw new Error(
+          response.ok
+            ? "Checkout returned an unreadable response. Please try again."
+            : `Checkout failed before returning a response (HTTP ${response.status}). Please try again.`,
+        );
+      }
       if (!response.ok) {
         throw new Error(
           typeof result.error === "string" ? result.error : "Could not start SquadCo checkout.",
@@ -2670,56 +2866,16 @@ function App() {
     case "quiz-setup":
       title = "Take a quiz";
       content = (
-        <>
-          <div className="page-head compact">
-            <span className="eyebrow">Published quizzes</span>
-            <h1>Choose your challenge.</h1>
-            <p>
-              Your department and university matches appear first, but all published quizzes remain
-              available. A moderator approves each question before it goes live.
-            </p>
-          </div>
-          {publishedQuizSetsLoading ? (
-            <p className="field-note" role="status">
-              Loading published quizzes…
-            </p>
-          ) : prioritizedQuizSets.length ? (
-            <div className="course-list quiz-catalog-grid">
-              {prioritizedQuizSets.map((quiz) => (
-                <QuizCatalogCard
-                  key={quiz.id}
-                  quiz={quiz}
-                  busy={busy}
-                  onTake={() => void startQuiz(quiz.id)}
-                  onReadSource={() =>
-                    setSourceToRead({
-                      path: quiz.source_file_path!,
-                      title: `Original source: ${quiz.title}`,
-                    })
-                  }
-                />
-              ))}
-            </div>
-          ) : (
-            <>
-              <EmptyState
-                title="No published quizzes found"
-                text="A quiz appears after a reviewer approves at least one question with an answer key. Department labels affect priority, not visibility."
-                action="Browse past questions"
-                onAction={() => navigate("practice")}
-              />
-              <div className="admin-actions">
-                <Button
-                  variant="secondary"
-                  disabled={publishedQuizSetsLoading}
-                  onClick={() => void refreshPublishedQuizSets(true)}
-                >
-                  {publishedQuizSetsLoading ? "Refreshing…" : "Refresh quizzes"}
-                </Button>
-              </div>
-            </>
-          )}
-        </>
+        <QuizSetupPage
+          quizzes={prioritizedQuizSets}
+          courses={courses}
+          loading={publishedQuizSetsLoading}
+          busy={busy}
+          onTake={(quizId) => void startQuiz(quizId)}
+          onReadSource={(path, title) => setSourceToRead({ path, title })}
+          onRefresh={() => void refreshPublishedQuizSets(true)}
+          onBrowseCourses={() => navigate("practice")}
+        />
       );
       break;
     case "quiz":
