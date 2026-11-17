@@ -425,14 +425,26 @@ export async function submitQuizSet(
   quizId: string,
   answers: Record<string, number>,
   durationSeconds: number,
+  submissionKey: string,
 ) {
-  const { data, error } = await requireSupabase().rpc("submit_quiz_set_attempt", {
+  const client = requireSupabase();
+  const result = await client.rpc("submit_quiz_set_attempt", {
     p_quiz_id: quizId,
     p_answers: answers,
     p_duration_seconds: durationSeconds,
+    p_submission_key: submissionKey,
   });
-  if (error) throw error;
-  return data as QuizAttempt;
+  if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
+    const legacyResult = await client.rpc("submit_quiz_set_attempt", {
+      p_quiz_id: quizId,
+      p_answers: answers,
+      p_duration_seconds: durationSeconds,
+    });
+    if (legacyResult.error) throw legacyResult.error;
+    return legacyResult.data as QuizAttempt;
+  }
+  if (result.error) throw result.error;
+  return result.data as QuizAttempt;
 }
 
 export async function submitQuiz(
@@ -990,38 +1002,57 @@ export async function createContribution(
     notes: string;
   },
   file: File,
+  submissionKey: string,
 ) {
   const client = requireSupabase();
-  const path = `${userId}/${crypto.randomUUID()}-${file.name}`;
+  const safeFileName = file.name.replace(/[^\p{L}\p{N}._-]/gu, "_").slice(0, 120) || "upload";
+  const path = `${userId}/${crypto.randomUUID()}-${safeFileName}`;
   const { error: uploadError } = await client.storage.from("contributions").upload(path, file, {
     contentType: file.type,
     upsert: false,
   });
   if (uploadError) throw uploadError;
 
-  const { data, error } = await client
-    .from("contributions")
-    .insert({
-      user_id: userId,
-      name: contributor.name,
-      email: contributor.email,
-      university: course.university,
-      course_code: course.course_code,
-      course_title: course.course_title,
-      exam_year: course.exam_year,
-      notes: course.notes,
-      question_file_name: file.name,
-      storage_path: path,
-    })
-    .select("id, course_code, course_title, exam_year, status, created_at")
-    .single();
-  if (error) {
+  const result = await client.rpc("submit_contribution", {
+    p_submission_key: submissionKey,
+    p_university: course.university,
+    p_course_code: course.course_code,
+    p_course_title: course.course_title,
+    p_exam_year: course.exam_year,
+    p_notes: course.notes,
+    p_question_file_name: file.name,
+    p_storage_path: path,
+  });
+
+  if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
+    const legacyResult = await client
+      .from("contributions")
+      .insert({
+        user_id: userId,
+        name: contributor.name,
+        email: contributor.email,
+        university: course.university,
+        course_code: course.course_code,
+        course_title: course.course_title,
+        exam_year: course.exam_year,
+        notes: course.notes,
+        question_file_name: file.name,
+        storage_path: path,
+      })
+      .select("id, course_code, course_title, exam_year, status, created_at")
+      .single();
+    if (legacyResult.error) throw legacyResult.error;
+    return legacyResult.data as Contribution;
+  }
+  if (result.error) throw result.error;
+
+  const contribution = result.data as Contribution & { storage_path?: string };
+  if (contribution.storage_path && contribution.storage_path !== path) {
     const { error: cleanupError } = await client.storage.from("contributions").remove([path]);
     if (cleanupError)
-      console.error("Could not remove the unlinked contribution file.", cleanupError);
-    throw error;
+      console.error("Could not remove the duplicate contribution file.", cleanupError);
   }
-  return data as Contribution;
+  return contribution;
 }
 
 export async function createSuggestion(

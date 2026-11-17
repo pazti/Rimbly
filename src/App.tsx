@@ -437,11 +437,7 @@ function AuthPage({
             />
           </label>
           {login && (
-            <button
-              className="forgot"
-              type="button"
-              onClick={() => onNavigate("forgot-password")}
-            >
+            <button className="forgot" type="button" onClick={() => onNavigate("forgot-password")}>
               Forgot password?
             </button>
           )}
@@ -490,7 +486,11 @@ function ForgotPasswordPage({
           <p>Enter the email address on your account and we’ll send you a secure reset link.</p>
         </div>
         <Feedback error={error} clear={onClearError} />
-        {notice && <p className="app-notice" role="status">{notice}</p>}
+        {notice && (
+          <p className="app-notice" role="status">
+            {notice}
+          </p>
+        )}
         <form
           className="form-stack"
           onSubmit={(event) => {
@@ -514,7 +514,10 @@ function ForgotPasswordPage({
           </Button>
         </form>
         <p className="auth-switch">
-          Remembered it? <button type="button" onClick={() => onNavigate("login")}>Back to sign in</button>
+          Remembered it?{" "}
+          <button type="button" onClick={() => onNavigate("login")}>
+            Back to sign in
+          </button>
         </p>
       </div>
     </div>
@@ -1483,6 +1486,10 @@ function App() {
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [contributions, setContributions] = useState<Contribution[]>([]);
+  const quizSubmissionKeyRef = useRef<string | null>(null);
+  const contributionSubmissionKeyRef = useRef<string | null>(null);
+  const quizSubmissionLockRef = useRef(false);
+  const contributionSubmissionLockRef = useRef(false);
   const [savedCourseIds, setSavedCourseIds] = useState<string[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
@@ -1688,7 +1695,14 @@ function App() {
 
   useEffect(() => {
     if (!authReady) return;
-    const publicRoutes: Route[] = ["welcome", "signup", "login", "forgot-password", "verify-email", "reset-password"];
+    const publicRoutes: Route[] = [
+      "welcome",
+      "signup",
+      "login",
+      "forgot-password",
+      "verify-email",
+      "reset-password",
+    ];
     if (user && publicRoutes.includes(route) && route !== "reset-password")
       navigate(profile ? "home" : "onboarding");
     else if (!user && !publicRoutes.includes(route)) navigate("welcome");
@@ -2159,6 +2173,7 @@ function App() {
         : null;
       setSelectedPaperId(quizPaper?.id ?? null);
       setSelectedCourseId(quizPaper?.course_id ?? null);
+      quizSubmissionKeyRef.current = crypto.randomUUID();
       setActiveQuizSetId(quizId);
       setQuestions(nextQuestions);
       setAnswers({});
@@ -2177,12 +2192,32 @@ function App() {
   };
 
   const handleSubmitQuiz = async () => {
-    if (!activeQuizSetId || !user) return;
+    if (!activeQuizSetId || !user || quizSubmissionLockRef.current) return;
+    const answerIds = Object.keys(answers);
+    const questionsById = new Map(questions.map((question) => [question.id, question]));
+    const hasValidAnswers =
+      questions.length === 10 &&
+      answerIds.length === 10 &&
+      answerIds.every((questionId) => {
+        const question = questionsById.get(questionId);
+        const answer = answers[questionId];
+        return (
+          !!question && Number.isInteger(answer) && answer >= 0 && answer < question.options.length
+        );
+      });
+    if (!hasValidAnswers) {
+      setError("Answer all 10 questions before submitting.");
+      return;
+    }
+
+    quizSubmissionLockRef.current = true;
     setBusy(true);
     setError(null);
     try {
       const duration = Math.max(0, Math.floor((Date.now() - quizStartedAt) / 1000));
-      const attempt = await submitQuizSet(activeQuizSetId, answers, duration);
+      const submissionKey = (quizSubmissionKeyRef.current ??= crypto.randomUUID());
+      const attempt = await submitQuizSet(activeQuizSetId, answers, duration, submissionKey);
+      quizSubmissionKeyRef.current = null;
       const activeQuiz = publishedQuizSets.find((quiz) => quiz.id === activeQuizSetId);
       const previousAttempt = attempts.find(
         (item) =>
@@ -2219,6 +2254,7 @@ function App() {
     } catch (quizError) {
       setError(quizError instanceof Error ? quizError.message : "Could not save your quiz.");
     } finally {
+      quizSubmissionLockRef.current = false;
       setBusy(false);
     }
   };
@@ -2230,10 +2266,19 @@ function App() {
 
   const handleContribution = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!user) return;
+    if (!user || contributionSubmissionLockRef.current) return;
     const form = event.currentTarget;
     const data = new FormData(form);
     const file = data.get("file");
+    const course = {
+      university: String(data.get("university") ?? profile?.university ?? "").trim(),
+      course_code: String(data.get("course_code") ?? "").trim(),
+      course_title: String(data.get("course_title") ?? "").trim(),
+      exam_year: Number(data.get("exam_year")),
+      notes: String(data.get("notes") ?? "").trim(),
+    };
+    const currentYear = new Date().getFullYear();
+
     if (!(file instanceof File) || file.size === 0) {
       setError("Choose a PDF or image to upload.");
       return;
@@ -2242,25 +2287,43 @@ function App() {
       setError("The file must be 20 MB or smaller.");
       return;
     }
+    if (!file.name || file.name.length > 255 || /[\u0000-\u001f]/u.test(file.name)) {
+      setError("Use a file name with 255 characters or fewer and no control characters.");
+      return;
+    }
     if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
       setError("Upload a PDF, JPG, or PNG file.");
       return;
     }
+    if (
+      !course.university ||
+      course.university.length > 160 ||
+      !course.course_code ||
+      course.course_code.length > 40 ||
+      !course.course_title ||
+      course.course_title.length > 200 ||
+      !Number.isInteger(course.exam_year) ||
+      course.exam_year < 1990 ||
+      course.exam_year > currentYear ||
+      course.notes.length > 2000
+    ) {
+      setError("Check the university, course details, exam year, and notes before submitting.");
+      return;
+    }
+
+    contributionSubmissionLockRef.current = true;
     setBusy(true);
     setError(null);
     try {
+      const submissionKey = (contributionSubmissionKeyRef.current ??= crypto.randomUUID());
       await createContribution(
         user.id,
         { name: profile?.full_name || user.user_metadata.full_name || "", email: user.email ?? "" },
-        {
-          university: String(data.get("university") ?? profile?.university ?? "").trim(),
-          course_code: String(data.get("course_code") ?? "").trim(),
-          course_title: String(data.get("course_title") ?? "").trim(),
-          exam_year: Number(data.get("exam_year")),
-          notes: String(data.get("notes") ?? "").trim(),
-        },
+        course,
         file,
+        submissionKey,
       );
+      contributionSubmissionKeyRef.current = null;
       form.reset();
       setNotice("Your contribution was submitted for review.");
       try {
@@ -2275,6 +2338,7 @@ function App() {
         submitError instanceof Error ? submitError.message : "Could not submit your contribution.",
       );
     } finally {
+      contributionSubmissionLockRef.current = false;
       setBusy(false);
     }
   };
