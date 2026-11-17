@@ -40,7 +40,18 @@ export default async function handler(request: CheckoutRequest, response: Server
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const secretKey = process.env.SQUADCO_SECRET_KEY;
   const appUrl = process.env.APP_URL;
-  const mode = process.env.SQUADCO_MODE || "sandbox";
+  const configuredMode = process.env.SQUADCO_MODE?.trim().toLowerCase();
+  const mode =
+    configuredMode === "production" || configuredMode === "prod" || configuredMode === "live"
+      ? "production"
+      : configuredMode === "sandbox" ||
+          configuredMode === "test" ||
+          configuredMode === "development" ||
+          configuredMode === "dev"
+        ? "sandbox"
+        : process.env.VERCEL_ENV === "production"
+          ? "production"
+          : "sandbox";
   if (!supabaseUrl || !anonKey || !serviceRoleKey || !appUrl) {
     return respond(response, 503, {
       error: "Billing is not configured yet. Ask an administrator to finish the server setup.",
@@ -51,10 +62,6 @@ export default async function handler(request: CheckoutRequest, response: Server
       error: "SquadCo checkout is not enabled yet. The payment keys have not been added.",
     });
   }
-  if (mode !== "sandbox" && mode !== "production") {
-    return respond(response, 500, { error: "SQUADCO_MODE must be sandbox or production." });
-  }
-
   let callbackUrl: URL;
   try {
     callbackUrl = new URL(appUrl);

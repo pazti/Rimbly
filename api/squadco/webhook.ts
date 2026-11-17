@@ -56,16 +56,22 @@ export default async function handler(request: WebhookRequest, response: ServerR
   const secretKey = process.env.SQUADCO_SECRET_KEY;
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const mode = process.env.SQUADCO_MODE || "sandbox";
+  const configuredMode = process.env.SQUADCO_MODE?.trim().toLowerCase();
+  const mode =
+    configuredMode === "production" || configuredMode === "prod" || configuredMode === "live"
+      ? "production"
+      : configuredMode === "sandbox" ||
+          configuredMode === "test" ||
+          configuredMode === "development" ||
+          configuredMode === "dev"
+        ? "sandbox"
+        : process.env.VERCEL_ENV === "production"
+          ? "production"
+          : "sandbox";
   if (!secretKey || !supabaseUrl || !serviceRoleKey) {
     console.error("SquadCo webhook is not configured.");
     return respond(response, 503, "Webhook is not configured.");
   }
-  if (mode !== "sandbox" && mode !== "production") {
-    console.error("SQUADCO_MODE must be sandbox or production.");
-    return respond(response, 500, "Webhook configuration is invalid.");
-  }
-
   let rawBody: Buffer;
   try {
     rawBody = await readRawBody(request);
