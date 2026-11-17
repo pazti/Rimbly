@@ -51,6 +51,11 @@ export default async function handler(request: CheckoutRequest, response: Server
   if (mode !== "sandbox" && mode !== "production") {
     return respond(response, 500, { error: "SQUADCO_MODE must be sandbox or production." });
   }
+  if (mode === "production" && process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") {
+    return respond(response, 503, {
+      error: "Live SquadCo checkout is available only on the production deployment.",
+    });
+  }
 
   let callbackUrl: URL;
   try {

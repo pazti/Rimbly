@@ -66,6 +66,10 @@ export default async function handler(request: WebhookRequest, response: ServerR
     console.error("SQUADCO_MODE must be sandbox or production.");
     return respond(response, 500, "Webhook configuration is invalid.");
   }
+  if (mode === "production" && process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") {
+    console.error("Live SquadCo webhooks are available only on the production deployment.");
+    return respond(response, 503, "Webhook is not available in this deployment environment.");
+  }
 
   let rawBody: Buffer;
   try {
