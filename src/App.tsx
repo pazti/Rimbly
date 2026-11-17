@@ -905,7 +905,7 @@ function QuizSetupPage({
           placeholder="Search course code, title, department, or university"
         />
       </label>
-      <div className="practice-filters" aria-label="Filter quizzes">
+      <div className="practice-filters" role="group" aria-label="Filter quizzes">
         <label>
           <span>Level</span>
           <select value={level} onChange={(event) => setLevel(event.target.value)}>
@@ -948,7 +948,7 @@ function QuizSetupPage({
       <section>
         <div className="section-title">
           <div>
-            <span>
+            <span aria-live="polite" aria-atomic="true">
               {displayed.length} {displayed.length === 1 ? "quiz" : "quizzes"}
             </span>
             <h2>Published quizzes</h2>
@@ -1504,6 +1504,9 @@ function App() {
             ? "Checkout returned an unreadable response. Please try again."
             : `Checkout failed before returning a response (HTTP ${response.status}). Please try again.`,
         );
+      }
+      if (!result || typeof result !== "object") {
+        throw new Error("Checkout returned an invalid response. Please try again.");
       }
       if (!response.ok) {
         throw new Error(
