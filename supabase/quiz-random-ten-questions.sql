@@ -1,5 +1,5 @@
 -- Apply after quiz-audience-targeting.sql and quiz-revisions.sql.
--- Published quizzes must contain at least 11 approved, answerable questions.
+-- Quiz banks may contain any number of approved questions; each attempt draws up to 10 at random.
 begin;
 
 create or replace function public.enforce_minimum_quiz_question_count()
@@ -17,17 +17,6 @@ begin
     end if;
   elsif new.status <> 'published' then
     return new;
-  end if;
-
-  select count(*)::integer into approved_question_count
-  from public.quiz_set_questions question
-  where question.quiz_id = new.id
-    and question.paper_id is not distinct from new.paper_id
-    and question.review_status = 'approved'
-    and question.correct_index is not null;
-
-  if approved_question_count < 11 then
-    raise exception 'A quiz needs at least 11 approved, answerable questions before it can be published';
   end if;
 
   return new;
@@ -84,14 +73,6 @@ begin
     left join public.papers paper on paper.id = quiz.paper_id
     left join public.courses course on course.id = paper.course_id
     where quiz.status = 'published'
-      and (
-        select count(*)
-        from public.quiz_set_questions question
-        where question.quiz_id = quiz.id
-          and question.paper_id is not distinct from quiz.paper_id
-          and question.review_status = 'approved'
-          and question.correct_index is not null
-      ) >= 11
     order by quiz.created_at desc;
 end;
 $$;
@@ -107,7 +88,7 @@ returns table (
   explanation text
 )
 language plpgsql
-stable
+volatile
 security definer
 set search_path = pg_catalog, public
 as $$
@@ -131,8 +112,8 @@ begin
     )
     and question.review_status = 'approved'
     and question.correct_index is not null;
-  if approved_question_count < 11 then
-    raise exception 'This quiz needs at least 11 approved questions before it can be taken';
+  if approved_question_count = 0 then
+    raise exception 'This quiz has no approved questions yet';
   end if;
 
   return query
@@ -145,7 +126,8 @@ begin
       )
       and question.review_status = 'approved'
       and question.correct_index is not null
-    order by question.position, question.id;
+    order by random()
+    limit 10;
 end;
 $$;
 
@@ -182,31 +164,35 @@ begin
     raise exception 'This quiz is not published';
   end if;
 
-  select count(*)::integer into question_total
-  from public.quiz_set_questions question
-  where question.quiz_id = p_quiz_id
-    and question.paper_id is not distinct from (
-      select quiz.paper_id from public.quiz_sets quiz where quiz.id = p_quiz_id
-    )
-    and question.review_status = 'approved'
-    and question.correct_index is not null;
-  if question_total < 11 then
-    raise exception 'This quiz needs at least 11 approved questions before it can be submitted';
-  end if;
-  if (select count(*) from jsonb_object_keys(p_answers)) <> question_total then
-    raise exception 'Answer every question before submitting';
+  question_total := (select count(*)::integer from jsonb_object_keys(p_answers));
+  if question_total <> 10 then
+    raise exception 'A quiz attempt must contain exactly 10 answers';
   end if;
 
-  for quiz_question in
-    select question.id, question.correct_index, question.options
-    from public.quiz_set_questions question
+  if (
+    select count(*)
+    from jsonb_object_keys(p_answers) answer_key
+    join public.quiz_set_questions question on question.id = answer_key::uuid
     where question.quiz_id = p_quiz_id
       and question.paper_id is not distinct from (
         select quiz.paper_id from public.quiz_sets quiz where quiz.id = p_quiz_id
       )
       and question.review_status = 'approved'
       and question.correct_index is not null
-    order by question.position, question.id
+  ) <> question_total then
+    raise exception 'Answers must match the approved questions in this quiz';
+  end if;
+
+  for quiz_question in
+    select question.id, question.correct_index, question.options
+    from jsonb_object_keys(p_answers) answer_key
+    join public.quiz_set_questions question on question.id = answer_key::uuid
+    where question.quiz_id = p_quiz_id
+      and question.paper_id is not distinct from (
+        select quiz.paper_id from public.quiz_sets quiz where quiz.id = p_quiz_id
+      )
+      and question.review_status = 'approved'
+      and question.correct_index is not null
   loop
     if not (p_answers ? quiz_question.id::text)
       or jsonb_typeof(p_answers->quiz_question.id::text) <> 'number'
