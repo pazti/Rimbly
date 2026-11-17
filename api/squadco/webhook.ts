@@ -56,7 +56,8 @@ export default async function handler(request: WebhookRequest, response: ServerR
   const secretKey = process.env.SQUADCO_SECRET_KEY;
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const mode = process.env.SQUADCO_MODE || "sandbox";
+  const configuredMode = process.env.SQUADCO_MODE || "sandbox";
+  const mode = configuredMode === "prod" ? "production" : configuredMode;
   if (!secretKey || !supabaseUrl || !serviceRoleKey) {
     console.error("SquadCo webhook is not configured.");
     return respond(response, 503, "Webhook is not configured.");

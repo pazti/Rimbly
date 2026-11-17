@@ -36,7 +36,8 @@ export default async function handler(request: CheckoutRequest, response: Server
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const secretKey = process.env.SQUADCO_SECRET_KEY;
   const appUrl = process.env.APP_URL;
-  const mode = process.env.SQUADCO_MODE || "sandbox";
+  const configuredMode = process.env.SQUADCO_MODE || "sandbox";
+  const mode = configuredMode === "prod" ? "production" : configuredMode;
   if (!supabaseUrl || !anonKey || !serviceRoleKey || !appUrl) {
     return respond(response, 503, {
       error: "Billing is not configured yet. Ask an administrator to finish the server setup.",
