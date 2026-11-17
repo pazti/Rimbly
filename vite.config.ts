@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { handleQuizExtraction } from './src/server/quiz-extraction'
+import { createAdminInviteHandler } from './api/admin-invite'
 
 import siteConfiguration from './.figma/make/site.json'
 
@@ -24,6 +25,7 @@ export default defineConfig(({ mode }) => {
       react(),
       tailwindcss(),
       localQuizExtractionApi(environment),
+      localAdminInviteApi(environment),
       figmaSiteConfiguration(siteConfiguration),
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
@@ -633,6 +635,47 @@ function localQuizExtractionApi(environment: Record<string, string>): Plugin {
     },
     configurePreviewServer(server) {
       server.middlewares.use('/api/extract-quiz-questions', middleware)
+    },
+  }
+}
+
+function localAdminInviteApi(environment: Record<string, string>): Plugin {
+  const handler = createAdminInviteHandler(environment)
+  const middleware = async (
+    request: IncomingMessage & { body?: unknown },
+    response: ServerResponse,
+    next: (error?: Error) => void,
+  ) => {
+    if (request.method !== 'POST') return handler(request, response)
+
+    try {
+      const chunks: Buffer[] = []
+      let requestSize = 0
+      for await (const chunk of request) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        requestSize += buffer.length
+        if (requestSize > 16_384) {
+          response.statusCode = 413
+          response.setHeader('Content-Type', 'application/json; charset=utf-8')
+          response.end(JSON.stringify({ error: 'The invitation request is too large.' }))
+          return
+        }
+        chunks.push(buffer)
+      }
+      request.body = Buffer.concat(chunks).toString('utf8')
+      await handler(request, response)
+    } catch (error) {
+      next(error instanceof Error ? error : new Error('Invitation request failed.'))
+    }
+  }
+
+  return {
+    name: 'local-admin-invite-api',
+    configureServer(server) {
+      server.middlewares.use('/api/admin-invite', middleware)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/api/admin-invite', middleware)
     },
   }
 }

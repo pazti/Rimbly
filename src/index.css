@@ -2,23 +2,23 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f4f1f8;
+  --bg: #f5f6fa;
   --surface: #fff;
-  --ink: #0f0f0f;
-  --muted: #5f5a69;
-  --line: #ddd7e7;
-  --purple: #6d28d9;
-  --purple-dark: #5b21b6;
-  --purple-pale: #eee7fc;
+  --ink: #202638;
+  --muted: #657084;
+  --line: #e2e6ef;
+  --purple: #6840c5;
+  --purple-dark: #5233a4;
+  --purple-pale: #f0ebfb;
   --amber: var(--purple);
   --amber-pale: var(--purple-pale);
-  --green: #16a34a;
-  --green-pale: #e3f6e7;
-  --red: #dc2626;
-  --red-pale: #fee8e7;
-  --blue: #2563eb;
-  --blue-pale: #e4edff;
-  --shadow: 3px 3px 0 var(--ink);
+  --green: #16834a;
+  --green-pale: #e7f5ed;
+  --red: #c43b3b;
+  --red-pale: #fdf0ef;
+  --blue: #315eaf;
+  --blue-pale: #edf3ff;
+  --shadow: 0 12px 30px rgb(32 38 56 / 8%);
 }
 @layer base {
   * {
@@ -3383,35 +3383,6 @@ select {
   margin-top: 9px;
   color: var(--muted);
   font-size: 10px;
-}
-.google-btn {
-  width: 100%;
-  height: 48px;
-  border: 2px solid var(--ink);
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: var(--shadow);
-  font-size: 11px;
-  font-weight: 800;
-}
-.google-btn b {
-  margin-right: 10px;
-  color: #4285f4;
-  font-size: 17px;
-}
-.or {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 22px 0;
-  color: #888;
-  font-size: 8px;
-  text-transform: uppercase;
-}
-.or span {
-  height: 1px;
-  flex: 1;
-  background: var(--line);
 }
 .form-stack .forgot {
   align-self: flex-end;

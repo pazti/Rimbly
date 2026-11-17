@@ -373,7 +373,6 @@ function AuthPage({
   busy,
   error,
   onSubmit,
-  onOAuth,
   onReset,
   onNavigate,
   onClearError,
@@ -383,7 +382,6 @@ function AuthPage({
   busy: boolean;
   error: string | null;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onOAuth: () => void;
   onReset: (email: string) => void;
   onNavigate: (route: Route) => void;
   onClearError: () => void;
@@ -410,19 +408,6 @@ function AuthPage({
           </p>
         </div>
         <Feedback error={error} clear={onClearError} />
-        <button
-          className="google-btn"
-          type="button"
-          onClick={onOAuth}
-          disabled={busy || !configured}
-        >
-          <b>G</b>Continue with Google
-        </button>
-        <div className="or">
-          <span />
-          or continue with email
-          <span />
-        </div>
         <form onSubmit={onSubmit} className="form-stack">
           {!login && (
             <label>
@@ -2012,20 +1997,6 @@ function App() {
     }
   };
 
-  const handleGoogleAuth = async () => {
-    if (!supabase) return;
-    setBusy(true);
-    setError(null);
-    const { error: authError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: routeUrl("onboarding") },
-    });
-    if (authError) {
-      setError(authError.message);
-      setBusy(false);
-    }
-  };
-
   const handleResetPassword = async (email: string) => {
     if (!supabase || !email) return;
     setBusy(true);
@@ -2474,7 +2445,6 @@ function App() {
           busy={busy}
           error={pageError}
           onSubmit={(event) => void handleAuth(event, route)}
-          onOAuth={() => void handleGoogleAuth()}
           onReset={(email) => void handleResetPassword(email)}
           onNavigate={navigate}
           onClearError={() => setError(null)}
