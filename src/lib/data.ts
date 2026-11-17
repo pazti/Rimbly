@@ -1091,11 +1091,32 @@ export async function getAdminContributionUrl(path: string) {
 }
 
 export async function inviteAdmin(email: string, role: AdminAccess["role"]) {
-  const { data, error } = await requireSupabase().functions.invoke("admin-invite", {
-    body: { email, role },
-  });
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
+  const client = requireSupabase();
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError) throw sessionError;
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) throw new Error("Sign in again before sending a team invitation.");
+
+  let response: Response;
+  try {
+    response = await fetch("/api/admin-invite", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, role }),
+    });
+  } catch {
+    throw new Error("The invitation service could not be reached. Refresh and try again.");
+  }
+
+  const result = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  if (!response.ok) {
+    throw new Error(
+      typeof result?.error === "string" ? result.error : "Could not invite this team member.",
+    );
+  }
 }
 
 export async function getAdminTeam() {
@@ -1122,9 +1143,9 @@ export async function getAdminStudents(search: string) {
     p_search: search,
   });
   if (error) {
-    if (["PGRST202", "PGRST204", "42883", "42P01", "42703"].includes(error.code ?? "")) {
+    if (["PGRST202", "PGRST204", "42883", "42P01", "42703", "42804"].includes(error.code ?? "")) {
       throw new Error(
-        "Student management setup is incomplete. Run supabase/admin-management.sql, then reload the admin page.",
+        "Student management SQL is missing or outdated. Apply supabase/admin-management.sql again, then reload the admin page.",
       );
     }
     if (error.code === "42501") {

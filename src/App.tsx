@@ -90,6 +90,7 @@ type Route =
   | "welcome"
   | "signup"
   | "login"
+  | "forgot-password"
   | "verify-email"
   | "reset-password"
   | "onboarding"
@@ -120,6 +121,7 @@ const routes: Route[] = [
   "welcome",
   "signup",
   "login",
+  "forgot-password",
   "verify-email",
   "reset-password",
   "onboarding",
@@ -373,8 +375,6 @@ function AuthPage({
   busy,
   error,
   onSubmit,
-  onOAuth,
-  onReset,
   onNavigate,
   onClearError,
   configured,
@@ -383,8 +383,6 @@ function AuthPage({
   busy: boolean;
   error: string | null;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onOAuth: () => void;
-  onReset: (email: string) => void;
   onNavigate: (route: Route) => void;
   onClearError: () => void;
   configured: boolean;
@@ -410,19 +408,6 @@ function AuthPage({
           </p>
         </div>
         <Feedback error={error} clear={onClearError} />
-        <button
-          className="google-btn"
-          type="button"
-          onClick={onOAuth}
-          disabled={busy || !configured}
-        >
-          <b>G</b>Continue with Google
-        </button>
-        <div className="or">
-          <span />
-          or continue with email
-          <span />
-        </div>
         <form onSubmit={onSubmit} className="form-stack">
           {!login && (
             <label>
@@ -455,8 +440,7 @@ function AuthPage({
             <button
               className="forgot"
               type="button"
-              onClick={() => onReset(email)}
-              disabled={!email || !configured || busy}
+              onClick={() => onNavigate("forgot-password")}
             >
               Forgot password?
             </button>
@@ -470,6 +454,67 @@ function AuthPage({
           <button type="button" onClick={() => onNavigate(login ? "signup" : "login")}>
             {login ? "Create account" : "Sign in"}
           </button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ForgotPasswordPage({
+  busy,
+  error,
+  notice,
+  onSubmit,
+  onNavigate,
+  onClearError,
+  configured,
+}: {
+  busy: boolean;
+  error: string | null;
+  notice: string | null;
+  onSubmit: (email: string) => void;
+  onNavigate: (route: Route) => void;
+  onClearError: () => void;
+  configured: boolean;
+}) {
+  const [email, setEmail] = useState("");
+  return (
+    <div className="auth-form-page">
+      <div className="auth-form-wrap">
+        <div className="auth-form-head">
+          <Logo onClick={() => onNavigate("welcome")} />
+        </div>
+        <div className="auth-copy">
+          <span className="eyebrow">Account recovery</span>
+          <h1>Forgot your password?</h1>
+          <p>Enter the email address on your account and we’ll send you a secure reset link.</p>
+        </div>
+        <Feedback error={error} clear={onClearError} />
+        {notice && <p className="app-notice" role="status">{notice}</p>}
+        <form
+          className="form-stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit(email.trim());
+          }}
+        >
+          <label>
+            <span>Email address</span>
+            <input
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </label>
+          <Button type="submit" disabled={busy || !configured}>
+            {busy ? "Sending…" : "Send reset link"}
+          </Button>
+        </form>
+        <p className="auth-switch">
+          Remembered it? <button type="button" onClick={() => onNavigate("login")}>Back to sign in</button>
         </p>
       </div>
     </div>
@@ -1643,7 +1688,7 @@ function App() {
 
   useEffect(() => {
     if (!authReady) return;
-    const publicRoutes: Route[] = ["welcome", "signup", "login", "verify-email", "reset-password"];
+    const publicRoutes: Route[] = ["welcome", "signup", "login", "forgot-password", "verify-email", "reset-password"];
     if (user && publicRoutes.includes(route) && route !== "reset-password")
       navigate(profile ? "home" : "onboarding");
     else if (!user && !publicRoutes.includes(route)) navigate("welcome");
@@ -2012,24 +2057,11 @@ function App() {
     }
   };
 
-  const handleGoogleAuth = async () => {
-    if (!supabase) return;
-    setBusy(true);
-    setError(null);
-    const { error: authError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: routeUrl("onboarding") },
-    });
-    if (authError) {
-      setError(authError.message);
-      setBusy(false);
-    }
-  };
-
   const handleResetPassword = async (email: string) => {
     if (!supabase || !email) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: routeUrl("reset-password"),
@@ -2401,6 +2433,20 @@ function App() {
     );
   }
 
+  if (route === "forgot-password") {
+    return (
+      <ForgotPasswordPage
+        busy={busy}
+        error={pageError}
+        notice={notice}
+        onSubmit={(email) => void handleResetPassword(email)}
+        onNavigate={navigate}
+        onClearError={() => setError(null)}
+        configured={Boolean(supabase)}
+      />
+    );
+  }
+
   if (route === "verify-email") {
     return (
       <VerifyEmailPage
@@ -2474,8 +2520,6 @@ function App() {
           busy={busy}
           error={pageError}
           onSubmit={(event) => void handleAuth(event, route)}
-          onOAuth={() => void handleGoogleAuth()}
-          onReset={(email) => void handleResetPassword(email)}
           onNavigate={navigate}
           onClearError={() => setError(null)}
           configured={Boolean(supabase)}

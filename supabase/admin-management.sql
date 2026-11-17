@@ -307,14 +307,14 @@ begin
   end if;
 
   return query
-    select profile.id,
-      profile.full_name,
-      auth_user.email,
-      profile.university,
-      profile.department,
-      profile.level,
-      profile.created_at,
-      coalesce(control.suspended, false)
+    select profile.id::uuid,
+      profile.full_name::text,
+      auth_user.email::text,
+      profile.university::text,
+      profile.department::text,
+      profile.level::text,
+      profile.created_at::timestamptz,
+      coalesce(control.suspended, false)::boolean
     from public.profiles profile
     join auth.users auth_user on auth_user.id = profile.id
     left join public.admin_user_controls control on control.user_id = profile.id
