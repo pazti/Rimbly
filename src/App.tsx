@@ -779,31 +779,32 @@ function QuizCatalogCard({
 
   return (
     <article className="quiz-catalog-card">
-      <div className="quiz-card-top">
-        <span className="quiz-card-mark" aria-hidden="true">
-          ✦
-        </span>
-        <span className="quiz-card-question-count">{quiz.question_count} questions</span>
-      </div>
+      <span className="quiz-card-mark" aria-hidden="true">
+        ✦
+      </span>
       <div className="quiz-card-copy">
         {courseLabel && <span className="quiz-card-course">{courseLabel}</span>}
         <h2>{quiz.title}</h2>
         <p>{quiz.description || "Reviewed practice questions"}</p>
+        <div className="quiz-card-meta">
+          <small className="quiz-audience-meta">
+            {departments.join(" / ") || "General"} ·{" "}
+            {universities.join(" / ") || "All universities"}
+          </small>
+          {quiz.source_file_path && (
+            <button type="button" className="quiz-source-link" onClick={onReadSource}>
+              Read source: {quiz.source_file_name ?? "Source paper"}
+            </button>
+          )}
+        </div>
       </div>
-      <div className="quiz-card-meta">
-        <small className="quiz-audience-meta">
-          {departments.join(" / ") || "General"} · {universities.join(" / ") || "All universities"}
-        </small>
-        {quiz.source_file_path && (
-          <button type="button" className="quiz-source-link" onClick={onReadSource}>
-            Read source in viewer: {quiz.source_file_name ?? "Source paper"}
-          </button>
-        )}
+      <div className="quiz-card-actions">
+        <span className="quiz-card-question-count">{quiz.question_count} questions</span>
+        <Button disabled={busy} onClick={onTake} ariaLabel={`Start quiz: ${quiz.title}`}>
+          {busy ? "Loading…" : "Start quiz"}
+          <span aria-hidden="true">→</span>
+        </Button>
       </div>
-      <Button disabled={busy} onClick={onTake} ariaLabel={`Start quiz: ${quiz.title}`}>
-        {busy ? "Loading…" : "Start quiz"}
-        <span aria-hidden="true">→</span>
-      </Button>
     </article>
   );
 }
