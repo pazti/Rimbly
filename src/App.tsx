@@ -861,20 +861,23 @@ function QuizSetupPage({
   const faculties = Array.from(
     new Set(courses.map((course) => course.faculty).filter((value): value is string => !!value)),
   ).sort((a, b) => a.localeCompare(b));
-  const departments = Array.from(
-    new Set(quizEntries.flatMap((entry) => entry.departments)),
-  ).sort((a, b) => a.localeCompare(b));
-  const displayed = quizEntries.filter(({ quiz, course, levels: quizLevels, departments: quizDepartments }) => {
-    const matchesSearch = `${quiz.course_code ?? ""} ${quiz.course_title ?? ""} ${quiz.title} ${quiz.description} ${quiz.university ?? ""} ${quiz.audience_university ?? ""} ${quizDepartments.join(" ")}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase());
-    return (
-      matchesSearch &&
-      (!level || quizLevels.includes(level)) &&
-      (!faculty || course?.faculty === faculty) &&
-      (!department || quizDepartments.includes(department))
-    );
-  });
+  const departments = Array.from(new Set(quizEntries.flatMap((entry) => entry.departments))).sort(
+    (a, b) => a.localeCompare(b),
+  );
+  const displayed = quizEntries.filter(
+    ({ quiz, course, levels: quizLevels, departments: quizDepartments }) => {
+      const matchesSearch =
+        `${quiz.course_code ?? ""} ${quiz.course_title ?? ""} ${quiz.title} ${quiz.description} ${quiz.university ?? ""} ${quiz.audience_university ?? ""} ${quizDepartments.join(" ")}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase());
+      return (
+        matchesSearch &&
+        (!level || quizLevels.includes(level)) &&
+        (!faculty || course?.faculty === faculty) &&
+        (!department || quizDepartments.includes(department))
+      );
+    },
+  );
   const hasFilters = Boolean(search || level || faculty || department);
   const clearFilters = () => {
     setSearch("");
@@ -965,10 +968,7 @@ function QuizSetupPage({
                 onTake={() => onTake(quiz.id)}
                 onReadSource={() => {
                   if (quiz.source_file_path) {
-                    onReadSource(
-                      quiz.source_file_path,
-                      `Original source: ${quiz.title}`,
-                    );
+                    onReadSource(quiz.source_file_path, `Original source: ${quiz.title}`);
                   }
                 }}
               />
