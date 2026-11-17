@@ -2531,9 +2531,16 @@ function App() {
         <div className="auth-shell">
           <section className="auth-art">
             <Logo onClick={() => navigate("welcome")} />
-            <div className="welcome-emblem">
-              <span>✦</span>
-              <i>R</i>
+            <div className="welcome-emblem" aria-hidden="true">
+              <video
+                className="welcome-cheetah"
+                src="/rimbly-cheetah-hero.mp4"
+                autoPlay
+                loop
+                muted
+                playsInline
+                preload="metadata"
+              />
             </div>
             <div>
               <span className="badge badge-amber">Built for students</span>
