@@ -7,10 +7,20 @@ alter table public.player_game_stats
 
 create table if not exists public.player_badges (
   user_id uuid not null references auth.users(id) on delete cascade,
-  badge_id text not null check (badge_id in ('first_win', 'perfect_score', 'speed_demon', 'daily_7')),
+  badge_id text not null check (
+    badge_id in ('first_win', 'perfect_score', 'speed_demon', 'daily_3', 'daily_7', 'daily_14', 'daily_30')
+  ),
   earned_at timestamptz not null default now(),
   primary key (user_id, badge_id)
 );
+
+alter table public.player_badges
+  drop constraint if exists player_badges_badge_id_check;
+alter table public.player_badges
+  add constraint player_badges_badge_id_check
+  check (badge_id in (
+    'first_win', 'perfect_score', 'speed_demon', 'daily_3', 'daily_7', 'daily_14', 'daily_30'
+  ));
 
 alter table public.player_badges enable row level security;
 revoke all on public.player_badges from public, anon;
@@ -107,8 +117,17 @@ begin
       updated_at = now()
   returning current_daily_streak into resulting_streak;
 
+  if resulting_streak >= 3 then
+    perform public.award_player_badge(p_user_id, 'daily_3');
+  end if;
   if resulting_streak >= 7 then
     perform public.award_player_badge(p_user_id, 'daily_7');
+  end if;
+  if resulting_streak >= 14 then
+    perform public.award_player_badge(p_user_id, 'daily_14');
+  end if;
+  if resulting_streak >= 30 then
+    perform public.award_player_badge(p_user_id, 'daily_30');
   end if;
   return resulting_streak;
 end;
@@ -622,3 +641,56 @@ revoke all on function public.get_game_leaderboard(text, text) from public, anon
 revoke all on function public.get_my_game_progress() from public, anon;
 grant execute on function public.get_game_leaderboard(text, text) to authenticated;
 grant execute on function public.get_my_game_progress() to authenticated;
+
+create or replace function public.get_daily_challenge_leaderboard(p_quiz_id uuid)
+returns table (
+  user_id uuid,
+  full_name text,
+  score_percent integer,
+  correct_count integer,
+  total_questions integer,
+  duration_seconds integer
+)
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  utc_day_start timestamptz := date_trunc('day', now() at time zone 'UTC') at time zone 'UTC';
+begin
+  if auth.uid() is null or public.current_user_is_suspended() then
+    raise exception 'An active signed-in account is required' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.quiz_sets quiz
+    where quiz.id = p_quiz_id and quiz.status = 'published'
+  ) then
+    raise exception 'Today’s challenge is no longer published';
+  end if;
+
+  return query
+    with today_attempts as (
+      select attempt.user_id, attempt.score_percent, attempt.correct_count,
+        attempt.total_questions, attempt.duration_seconds, attempt.created_at,
+        row_number() over (
+          partition by attempt.user_id
+          order by attempt.score_percent desc, attempt.duration_seconds, attempt.created_at
+        ) as user_rank
+      from public.quiz_set_attempts attempt
+      where attempt.quiz_id = p_quiz_id
+        and attempt.created_at >= utc_day_start
+        and attempt.total_questions = 10
+    )
+    select attempt.user_id, profile.full_name, attempt.score_percent,
+      attempt.correct_count, attempt.total_questions, attempt.duration_seconds
+    from today_attempts attempt
+    join public.profiles profile on profile.id = attempt.user_id
+    where attempt.user_rank = 1
+    order by attempt.correct_count desc, attempt.duration_seconds, attempt.created_at
+    limit 10;
+end;
+$$;
+
+revoke all on function public.get_daily_challenge_leaderboard(uuid) from public, anon;
+grant execute on function public.get_daily_challenge_leaderboard(uuid) to authenticated;

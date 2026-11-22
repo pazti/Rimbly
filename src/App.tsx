@@ -19,6 +19,10 @@ import {
   Battle,
   Course,
   GameProgress,
+  DailyChallengeLeader,
+  GuestExploreCatalog,
+  OpenBattleInvite,
+  UniversityBattleActivity,
   Leader,
   Paper,
   Profile,
@@ -57,6 +61,7 @@ import {
   setAdminStudentSuspension,
   updateAdminTeamMember,
   getLeaderboard,
+  getDailyChallengeLeaderboard,
   getGameProgress,
   getNotifications,
   getPapers,
@@ -68,13 +73,18 @@ import {
   submitQuizSet,
   getBattleOpponents,
   createBattle,
+  createOpenBattleChallenge,
   getBattles,
+  getUniversityBattleActivity,
+  getOpenBattleChallenge,
+  acceptOpenBattleChallenge,
   respondToBattle,
   cancelBattle,
   getBattleQuestions,
   submitBattle,
   getUniversities,
   getQuizAttempts,
+  getGuestExploreCatalog,
   getSavedCourseIds,
   markNotificationsRead,
   saveProfile,
@@ -93,6 +103,7 @@ type Route =
   | "forgot-password"
   | "verify-email"
   | "reset-password"
+  | "explore"
   | "onboarding"
   | "home"
   | "practice"
@@ -124,6 +135,7 @@ const routes: Route[] = [
   "forgot-password",
   "verify-email",
   "reset-password",
+  "explore",
   "onboarding",
   "home",
   "practice",
@@ -151,7 +163,23 @@ const routeFromLocation = (): Route => {
   return routes.includes(hashRoute as Route) ? (hashRoute as Route) : "welcome";
 };
 
-const routeUrl = (route: Route) => `${window.location.origin}/?route=${encodeURIComponent(route)}`;
+const pendingBattleInviteStorageKey = "rimbly-pending-battle-invite";
+
+const routeUrl = (route: Route) => {
+  const search = new URLSearchParams({ route });
+  const pendingBattleId = window.sessionStorage.getItem(pendingBattleInviteStorageKey);
+  if (pendingBattleId) search.set("challenge", pendingBattleId);
+  return `${window.location.origin}/?${search.toString()}`;
+};
+
+const pendingBattleInviteFromLocation = () => {
+  const challengeId = new URLSearchParams(window.location.search).get("challenge");
+  if (challengeId) {
+    window.sessionStorage.setItem(pendingBattleInviteStorageKey, challengeId);
+    return challengeId;
+  }
+  return window.sessionStorage.getItem(pendingBattleInviteStorageKey);
+};
 
 const adminQuestionPrompt = `Read the attached past-paper PDF and draft faithful multiple-choice questions using only information visible in the source. Do not invent wording, options, answers, or page references. Skip anything unclear rather than guessing.
 
@@ -285,11 +313,398 @@ function EmptyState({
       <span className="empty-card-icon">⌁</span>
       <h3>{title}</h3>
       <p>{text}</p>
-      {action && onAction && (
-        <Button variant="secondary" onClick={onAction}>
-          {action}
+      {action && onAction && <Button onClick={onAction}>{action}</Button>}
+    </div>
+  );
+}
+
+function LoadingCards({ label, count = 3 }: { label: string; count?: number }) {
+  return (
+    <div className="loading-card-list" role="status" aria-label={label}>
+      {Array.from({ length: count }, (_, index) => (
+        <span className="loading-card-skeleton" key={index} />
+      ))}
+    </div>
+  );
+}
+
+function FirstSessionGuide({
+  quiz,
+  onStart,
+  onBrowse,
+  onBattle,
+  onDismiss,
+}: {
+  quiz: QuizSet | null;
+  onStart: () => void;
+  onBrowse: () => void;
+  onBattle: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <section className="first-session-guide" aria-labelledby="first-session-title">
+      <div>
+        <span className="eyebrow">Your first study session</span>
+        <h2 id="first-session-title">
+          {quiz ? `Start with ${quiz.title}.` : "Your study space is ready."}
+        </h2>
+        <p>
+          {quiz
+            ? "We picked a reviewed quiz to help you get started. Your score and progress will be saved."
+            : "Browse reviewed quizzes, then come back to track your daily practice and streak."}
+        </p>
+      </div>
+      <ol aria-label="Getting started">
+        <li>
+          <span>1</span>Take one reviewed quiz
+        </li>
+        <li>
+          <span>2</span>Review your score and answers
+        </li>
+        <li>
+          <span>3</span>Try a university battle when you’re ready
+        </li>
+      </ol>
+      <div className="home-preview-ghost" aria-label="Preview of your progress after you practise">
+        <div>
+          <strong>0 days</strong>
+          <small>Daily streak</small>
+        </div>
+        <div>
+          <strong>—</strong>
+          <small>Quiz scores</small>
+        </div>
+        <div>
+          <strong>Join in</strong>
+          <small>Campus rankings</small>
+        </div>
+      </div>
+      <div className="first-session-actions">
+        <Button onClick={quiz ? onStart : onBrowse}>
+          {quiz ? "Start recommended quiz" : "Browse reviewed quizzes"}
         </Button>
+        <button type="button" className="text-button" onClick={onBattle}>
+          Explore Battle
+        </button>
+        <button type="button" className="text-button" onClick={onDismiss}>
+          Skip this guide
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function QuizPreview() {
+  const sampleQuestions = [
+    {
+      prompt: "Which habit helps build lasting study progress?",
+      options: ["Study a little every day", "Wait until exam week", "Skip difficult topics"],
+      correctIndex: 0,
+    },
+    {
+      prompt: "What is a useful next step after a practice quiz?",
+      options: ["Review missed answers", "Forget the result", "Avoid the topic"],
+      correctIndex: 0,
+    },
+  ];
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [submitted, setSubmitted] = useState(false);
+  const question = sampleQuestions[questionIndex];
+  const score = sampleQuestions.reduce(
+    (total, sample, index) => total + Number(answers[index] === sample.correctIndex),
+    0,
+  );
+  const reset = () => {
+    setQuestionIndex(0);
+    setAnswers({});
+    setSubmitted(false);
+  };
+
+  return (
+    <section className="quiz-preview" aria-label="Interactive sample quiz">
+      <div className="quiz-preview-heading">
+        <span className="eyebrow">Try a sample quiz</span>
+        <span className="badge badge-purple">
+          Question {questionIndex + 1} of {sampleQuestions.length}
+        </span>
+      </div>
+      <h3>{question.prompt}</h3>
+      <div className="quiz-preview-options">
+        {question.options.map((option, index) => (
+          <button
+            type="button"
+            className={answers[questionIndex] === index ? "selected" : ""}
+            aria-pressed={answers[questionIndex] === index}
+            key={option}
+            onClick={() => {
+              setAnswers((current) => ({ ...current, [questionIndex]: index }));
+              setSubmitted(false);
+            }}
+          >
+            <span>{String.fromCharCode(65 + index)}</span>
+            {option}
+          </button>
+        ))}
+      </div>
+      {submitted && (
+        <p className="quiz-preview-result" role="status">
+          You got {score} of {sampleQuestions.length} correct.{" "}
+          {score === sampleQuestions.length
+            ? "Nice work—review is how learning sticks."
+            : "Reviewing missed answers helps make the next attempt stronger."}
+        </p>
       )}
+      <div className="quiz-preview-actions">
+        {submitted ? (
+          <Button variant="secondary" onClick={reset}>
+            Try again
+          </Button>
+        ) : questionIndex > 0 ? (
+          <Button variant="secondary" onClick={() => setQuestionIndex((current) => current - 1)}>
+            Previous
+          </Button>
+        ) : null}
+        {submitted ? null : questionIndex < sampleQuestions.length - 1 ? (
+          <Button
+            disabled={answers[questionIndex] === undefined}
+            onClick={() => setQuestionIndex((current) => current + 1)}
+          >
+            Next question
+          </Button>
+        ) : (
+          <Button
+            disabled={Object.keys(answers).length !== sampleQuestions.length}
+            onClick={() => setSubmitted(true)}
+          >
+            See sample score
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function GuestExplorePage({
+  configured,
+  onNavigate,
+}: {
+  configured: boolean;
+  onNavigate: (route: Route) => void;
+}) {
+  const [catalog, setCatalog] = useState<GuestExploreCatalog | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [university, setUniversity] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    if (!configured) {
+      setError("Guest Explore is unavailable until the database is configured.");
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setLoading(true);
+    setError(null);
+    void getGuestExploreCatalog()
+      .then((result) => {
+        if (active) setCatalog(result);
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setError(
+            loadError instanceof Error ? loadError.message : "Could not load the course catalog.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [configured, reloadKey]);
+
+  const universities = [
+    ...new Set(catalog?.courses.map((course) => course.university).filter(Boolean) ?? []),
+  ].sort((first, second) => first.localeCompare(second));
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const courses = (catalog?.courses ?? []).filter((course) => {
+    const matchesSearch =
+      `${course.code} ${course.title} ${course.university} ${course.department ?? ""}`
+        .toLocaleLowerCase()
+        .includes(normalizedSearch);
+    return matchesSearch && (!university || course.university === university);
+  });
+  const quizzes = (catalog?.quizzes ?? []).filter((quiz) => {
+    const matchesSearch =
+      `${quiz.title} ${quiz.course_code ?? ""} ${quiz.course_title ?? ""} ${quiz.university ?? ""}`
+        .toLocaleLowerCase()
+        .includes(normalizedSearch);
+    return matchesSearch && (!university || quiz.university === university);
+  });
+
+  return (
+    <div className="guest-explore-page">
+      <header className="guest-explore-header">
+        <Logo onClick={() => onNavigate("welcome")} />
+        <div>
+          <Button variant="secondary" onClick={() => onNavigate("login")}>
+            Sign in
+          </Button>
+          <Button onClick={() => onNavigate("signup")}>Join free</Button>
+        </div>
+      </header>
+      <main className="app-main guest-explore-main">
+        <div className="page-head">
+          <span className="eyebrow">Explore without an account</span>
+          <h1>Find your next practice.</h1>
+          <p>Browse course coverage and reviewed quizzes before you join.</p>
+        </div>
+        <QuizPreview />
+        <label className="search-field guest-explore-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search course, department, or university"
+            aria-label="Search courses and quizzes"
+          />
+        </label>
+        <label className="guest-university-filter">
+          <span>University</span>
+          <select value={university} onChange={(event) => setUniversity(event.target.value)}>
+            <option value="">All universities</option>
+            {universities.map((name) => (
+              <option value={name} key={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {error && (
+          <div className="app-feedback" role="alert">
+            <span>{error}</span>
+            {configured && (
+              <Button variant="secondary" onClick={() => setReloadKey((current) => current + 1)}>
+                Try again
+              </Button>
+            )}
+          </div>
+        )}
+        {loading ? (
+          <section className="guest-catalog-section" aria-label="Loading public course catalog">
+            <div className="section-title">
+              <div>
+                <span>Course coverage</span>
+                <h2>Courses in the library</h2>
+              </div>
+            </div>
+            <div className="guest-course-skeletons" role="status">
+              <span />
+              <span />
+              <span />
+            </div>
+          </section>
+        ) : catalog ? (
+          <>
+            <section className="guest-catalog-section">
+              <div className="section-title">
+                <div>
+                  <span>
+                    {quizzes.length} reviewed {quizzes.length === 1 ? "quiz" : "quizzes"}
+                  </span>
+                  <h2>Try a full quiz after joining</h2>
+                </div>
+              </div>
+              {quizzes.length ? (
+                <div className="guest-quiz-list">
+                  {quizzes.map((quiz) => (
+                    <article className="guest-quiz-card" key={quiz.id}>
+                      <span className="badge badge-green">Reviewed quiz</span>
+                      <h3>{quiz.title}</h3>
+                      <p>
+                        {[quiz.course_code, quiz.course_title, quiz.university]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                      <small>{quiz.question_count} approved questions</small>
+                      <Button onClick={() => onNavigate("signup")}>Join to practise</Button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="No reviewed quizzes match yet"
+                  text="Try another search or browse courses while the reviewed quiz library grows."
+                />
+              )}
+            </section>
+            <section className="guest-catalog-section">
+              <div className="section-title">
+                <div>
+                  <span>
+                    {courses.length} {courses.length === 1 ? "course" : "courses"}
+                  </span>
+                  <h2>Courses in the library</h2>
+                </div>
+              </div>
+              {courses.length ? (
+                <div className="guest-course-list">
+                  {courses.map((course) => (
+                    <article className="guest-course-card" key={course.id}>
+                      <div className="guest-course-heading">
+                        <strong>{course.code}</strong>
+                        <span className={`badge ${course.is_verified ? "badge-green" : ""}`}>
+                          {course.is_verified ? "Verified listing" : "Course listing"}
+                        </span>
+                      </div>
+                      <h3>{course.title}</h3>
+                      <p>
+                        {[course.university, course.department, course.level]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                      <div className="guest-course-meta">
+                        <span>
+                          {course.paper_count}{" "}
+                          {course.paper_count === 1 ? "approved paper" : "approved papers"}
+                        </span>
+                        {course.has_reviewed_quiz && (
+                          <span className="badge badge-purple">Quiz ready</span>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="No courses match this search"
+                  text="Try another course, department, or university."
+                  action="Clear search"
+                  onAction={() => {
+                    setSearch("");
+                    setUniversity("");
+                  }}
+                />
+              )}
+            </section>
+          </>
+        ) : null}
+        <section className="guest-explore-cta">
+          <div>
+            <span className="eyebrow">Ready to make it count?</span>
+            <h2>Save your scores and build a study streak.</h2>
+          </div>
+          <Button onClick={() => onNavigate("signup")}>Create a free account</Button>
+        </section>
+      </main>
     </div>
   );
 }
@@ -316,6 +731,7 @@ function AppShell({
             <button
               key={item.route}
               className={route === item.route ? "active" : ""}
+              aria-current={route === item.route ? "page" : undefined}
               onClick={() => onNavigate(item.route)}
             >
               <Icon>{item.icon}</Icon>
@@ -358,6 +774,7 @@ function AppShell({
             <button
               key={item.route}
               className={route === item.route ? "active" : ""}
+              aria-current={route === item.route ? "page" : undefined}
               onClick={() => onNavigate(item.route)}
             >
               <Icon>{item.icon}</Icon>
@@ -404,17 +821,11 @@ function AuthPage({
           <p>
             {login
               ? "Sign in to continue where you left off."
-              : "Your next best score starts with one small step."}
+              : "Start with email and password. Add your university after you sign in."}
           </p>
         </div>
         <Feedback error={error} clear={onClearError} />
         <form onSubmit={onSubmit} className="form-stack">
-          {!login && (
-            <label>
-              <span>Full name</span>
-              <input name="full_name" required autoComplete="name" />
-            </label>
-          )}
           <label>
             <span>Email address</span>
             <input
@@ -610,6 +1021,9 @@ function VerifyEmailPage({
         <Button onClick={onResend} disabled={busy || !email}>
           {busy ? "Sending…" : "Resend confirmation email"}
         </Button>
+        <Button variant="secondary" onClick={() => onNavigate("explore")}>
+          Explore courses while you wait
+        </Button>
         <p className="auth-switch">
           Already confirmed?{" "}
           <button type="button" onClick={() => onNavigate("login")}>
@@ -725,10 +1139,12 @@ function MaintenancePage({
 function CourseCard({
   course,
   paperCount,
+  hasReviewedQuiz = false,
   onClick,
 }: {
   course: Course;
   paperCount: number;
+  hasReviewedQuiz?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -738,14 +1154,18 @@ function CourseCard({
       </span>
       <span className="course-copy">
         <span className="course-tags">
-          {course.department && <span className="badge">{course.department}</span>}
           <span className="badge badge-purple">{course.university}</span>
+          {course.department && <span className="badge">{course.department}</span>}
+          {course.is_verified && <span className="badge badge-green">Verified course</span>}
         </span>
         <strong>{course.code}</strong>
         <small>{course.title}</small>
-        <em>
-          {paperCount} {paperCount === 1 ? "paper" : "papers"} available
-        </em>
+        <span className="course-readiness-row">
+          <em>
+            {paperCount} {paperCount === 1 ? "paper" : "papers"} available
+          </em>
+          {hasReviewedQuiz && <span className="badge badge-green">Quiz ready</span>}
+        </span>
       </span>
       <span aria-hidden="true">›</span>
     </button>
@@ -808,6 +1228,13 @@ function sortQuizSetsForProfile(quizzes: QuizSet[], profile: Profile | null) {
   );
 }
 
+function courseHasReviewedQuiz(course: Course, papers: Paper[], quizzes: QuizSet[]) {
+  const coursePaperIds = new Set(
+    papers.filter((paper) => paper.course_id === course.id).map((paper) => paper.id),
+  );
+  return quizzes.some((quiz) => quiz.paper_id !== null && coursePaperIds.has(quiz.paper_id));
+}
+
 function QuizCatalogCard({
   quiz,
   busy,
@@ -835,9 +1262,15 @@ function QuizCatalogCard({
         <h2>{quiz.title}</h2>
         <p>{quiz.description || "Reviewed practice questions"}</p>
         <div className="quiz-card-meta">
+          <span className="badge badge-green">Reviewed questions</span>
           <small className="quiz-audience-meta">
-            {departments.join(" / ") || "General"} ·{" "}
-            {universities.join(" / ") || "All universities"}
+            {[
+              departments.join(" / ") || "General",
+              quiz.audience_level,
+              universities.join(" / ") || "University context not provided",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </small>
           {quiz.source_file_path && (
             <button type="button" className="quiz-source-link" onClick={onReadSource}>
@@ -926,7 +1359,7 @@ function QuizSetupPage({
       );
     },
   );
-  const hasFilters = Boolean(search || level || faculty || department);
+  const hasFilters = Boolean(search.trim() || level || faculty || department);
   const clearFilters = () => {
     setSearch("");
     setLevel("");
@@ -992,6 +1425,30 @@ function QuizSetupPage({
             Clear filters
           </button>
         )}
+        {hasFilters && (
+          <div className="practice-filter-chips" aria-label="Active quiz filters">
+            {search.trim() && (
+              <button type="button" onClick={() => setSearch("")}>
+                Search: {search.trim()} <span aria-hidden="true">×</span>
+              </button>
+            )}
+            {level && (
+              <button type="button" onClick={() => setLevel("")}>
+                {level} <span aria-hidden="true">×</span>
+              </button>
+            )}
+            {faculty && (
+              <button type="button" onClick={() => setFaculty("")}>
+                {faculty} <span aria-hidden="true">×</span>
+              </button>
+            )}
+            {department && (
+              <button type="button" onClick={() => setDepartment("")}>
+                {department} <span aria-hidden="true">×</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <section>
         <div className="section-title">
@@ -1003,9 +1460,7 @@ function QuizSetupPage({
           </div>
         </div>
         {loading ? (
-          <p className="field-note" role="status">
-            Loading published quizzes…
-          </p>
+          <LoadingCards label="Loading published quizzes" />
         ) : displayed.length ? (
           <div className="course-list quiz-catalog-grid">
             {displayed.map(({ quiz }) => (
@@ -1051,18 +1506,26 @@ function DailyGoalCard({
   progress,
   loading,
   error,
+  hasQuiz,
+  showAction = true,
   onQuiz,
-  onBattle,
   onPlans,
 }: {
   status: RimblyBillingStatus | null;
   progress: GameProgress | null;
   loading: boolean;
   error: string | null;
+  hasQuiz: boolean;
+  showAction?: boolean;
   onQuiz: () => void;
-  onBattle: () => void;
   onPlans: () => void;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   const didPractice = status?.did_practice_today ?? false;
   const quizRemaining = status
     ? Math.max(0, status.free_quiz_limit - status.quizzes_used_today)
@@ -1070,12 +1533,24 @@ function DailyGoalCard({
   const battleRemaining = status
     ? Math.max(0, status.free_battle_limit - status.battle_invites_used_today)
     : null;
+  const nextReset = new Date(now);
+  nextReset.setUTCHours(24, 0, 0, 0);
+  const minutesUntilReset = Math.max(0, Math.ceil((nextReset.getTime() - now) / 60_000));
+  const resetTime = `${Math.floor(minutesUntilReset / 60)}h ${minutesUntilReset % 60}m`;
+  const isEvening = new Date(now).getHours() >= 18;
+  const isProtectingStreak = (progress?.current_daily_streak ?? 0) > 0;
+  const nextMilestone = [3, 7, 14, 30].find(
+    (milestone) => milestone > (progress?.best_daily_streak ?? 0),
+  );
+  const milestoneProgress = nextMilestone
+    ? Math.min(100, ((progress?.current_daily_streak ?? 0) / nextMilestone) * 100)
+    : 100;
 
   return (
     <section className={`daily-goal-card ${didPractice ? "completed" : ""}`}>
       <div className="daily-goal-main">
         <span className="daily-goal-icon" aria-hidden="true">
-          {didPractice ? "✓" : "✦"}
+          {didPractice ? "✓" : progress?.current_daily_streak ? "🔥" : "✦"}
         </span>
         <div>
           <span className="eyebrow">{didPractice ? "Daily goal complete" : "Your daily goal"}</span>
@@ -1085,12 +1560,54 @@ function DailyGoalCard({
               : "One practice session. Keep your streak alive."}
           </h2>
           <p>
-            {progress
-              ? `You’re on a ${progress.current_daily_streak}-day study streak. Practice with a quiz or battle today to keep it going.`
+            {progress && progress.current_daily_streak > 0
+              ? didPractice
+                ? `You’re on a ${progress.current_daily_streak}-day streak. You kept it alive today.`
+                : `You’re on a ${progress.current_daily_streak}-day streak. Practice today to keep it alive.`
               : "Complete one quiz or battle today to build a steady study habit."}
           </p>
+          {isEvening && isProtectingStreak && !didPractice && (
+            <p className="daily-streak-warning" role="status">
+              A gentle reminder: one practice session before midnight keeps your streak going.
+            </p>
+          )}
         </div>
       </div>
+      {progress && (
+        <div className="daily-streak-milestones">
+          <div className="daily-streak-milestone-label">
+            <strong>
+              {nextMilestone ? `${nextMilestone}-day reward` : "All daily streak rewards unlocked"}
+            </strong>
+            <span>
+              {nextMilestone
+                ? `${Math.max(0, nextMilestone - progress.current_daily_streak)} days to go`
+                : "3 · 7 · 14 · 30 days"}
+            </span>
+          </div>
+          <div
+            className="daily-streak-track"
+            role="progressbar"
+            aria-label={
+              nextMilestone
+                ? `Progress to ${nextMilestone}-day streak reward`
+                : "All streak rewards unlocked"
+            }
+            aria-valuemin={0}
+            aria-valuemax={nextMilestone ?? 30}
+            aria-valuenow={Math.min(progress.current_daily_streak, nextMilestone ?? 30)}
+          >
+            <span style={{ width: `${milestoneProgress}%` }} />
+          </div>
+          <div className="daily-streak-badges" aria-label="Daily streak rewards">
+            {[3, 7, 14, 30].map((days) => (
+              <span className={progress.best_daily_streak >= days ? "earned" : ""} key={days}>
+                {days} days{progress.best_daily_streak >= days ? " ✓" : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="daily-goal-footer">
         <div className="daily-goal-allowances" aria-label="Today's free allowances">
           {loading ? (
@@ -1100,11 +1617,16 @@ function DailyGoalCard({
           ) : status ? (
             <>
               <span className="daily-goal-usage">
-                {status.is_pro ? "Unlimited quizzes" : `${quizRemaining} free quizzes left`}
+                {status.is_pro
+                  ? `Quizzes: ${status.quizzes_used_today} used today`
+                  : `Quizzes: ${status.quizzes_used_today}/${status.free_quiz_limit} used · ${quizRemaining} left`}
               </span>
               <span className="daily-goal-usage">
-                {status.is_pro ? "Unlimited battles" : `${battleRemaining} battle invites left`}
+                {status.is_pro
+                  ? `Battles: ${status.battle_invites_used_today} invites today`
+                  : `Battles: ${status.battle_invites_used_today}/${status.free_battle_limit} invites · ${battleRemaining} left`}
               </span>
+              <span className="daily-goal-usage daily-goal-reset">Resets in {resetTime} UTC</span>
             </>
           ) : (
             <button type="button" className="daily-goal-usage-link" onClick={onPlans}>
@@ -1112,17 +1634,200 @@ function DailyGoalCard({
             </button>
           )}
         </div>
-        <div className="daily-goal-actions">
-          <Button onClick={onQuiz}>Start a quiz</Button>
-          <Button variant="secondary" onClick={onBattle}>
-            Start a battle
-          </Button>
-        </div>
+        {showAction && (
+          <div className="daily-goal-actions">
+            <Button onClick={onQuiz}>
+              {didPractice
+                ? "Take another quiz"
+                : hasQuiz
+                  ? "Start today’s quiz"
+                  : "Browse quizzes"}
+            </Button>
+          </div>
+        )}
       </div>
       {error && !status && (
         <small className="daily-goal-error" role="status">
           Usage could not load: {error}
         </small>
+      )}
+      {didPractice && status && !status.is_pro && (
+        <small className="daily-goal-bonus" role="status">
+          Daily goal bonus unlocked: one extra free quiz today.
+        </small>
+      )}
+    </section>
+  );
+}
+
+function DailyChallengeCard({
+  quiz,
+  leaders,
+  leadersLoading,
+  leadersError,
+  userId,
+  onStart,
+}: {
+  quiz: QuizSet | null;
+  leaders: DailyChallengeLeader[];
+  leadersLoading: boolean;
+  leadersError: string | null;
+  userId: string;
+  onStart: () => void;
+}) {
+  const myRank = leaders.findIndex((leader) => leader.user_id === userId);
+
+  return (
+    <section className="daily-challenge-card">
+      <div className="daily-challenge-heading">
+        <div>
+          <span className="eyebrow">Same questions for everyone today</span>
+          <h2>Daily challenge</h2>
+        </div>
+        <span className="daily-challenge-mark" aria-hidden="true">
+          ✦
+        </span>
+      </div>
+      {quiz ? (
+        <>
+          <div className="daily-challenge-copy">
+            <strong>{quiz.title}</strong>
+            <span>
+              {quiz.course_code ? `${quiz.course_code} · ` : ""}
+              10 questions · Challenge changes at 00:00 UTC
+            </span>
+          </div>
+          <div className="daily-challenge-action">
+            <Button variant="secondary" onClick={onStart}>
+              Take today’s challenge
+            </Button>
+            {myRank >= 0 && (
+              <span>
+                You’re #{myRank + 1} today · {leaders[myRank].correct_count}/
+                {leaders[myRank].total_questions} correct
+              </span>
+            )}
+          </div>
+          <div className="daily-challenge-board">
+            <strong>Today’s leaderboard</strong>
+            {leadersError ? (
+              <p className="daily-challenge-error" role="alert">
+                Leaderboard unavailable: {leadersError}
+              </p>
+            ) : leadersLoading ? (
+              <p className="field-note" role="status">
+                Loading today’s scores…
+              </p>
+            ) : leaders.length ? (
+              leaders.slice(0, 3).map((leader, index) => (
+                <div
+                  className={`daily-challenge-leader ${leader.user_id === userId ? "me" : ""}`}
+                  key={leader.user_id}
+                >
+                  <span>
+                    #{index + 1} · {leader.full_name || "Student"}
+                    {leader.user_id === userId ? " (you)" : ""}
+                  </span>
+                  <strong>
+                    {leader.correct_count}/{leader.total_questions}
+                  </strong>
+                </div>
+              ))
+            ) : (
+              <p className="field-note">Be the first to post a score today.</p>
+            )}
+          </div>
+        </>
+      ) : (
+        <p className="field-note">
+          Today’s challenge will appear when a quiz with at least 10 reviewed questions is
+          available.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function CampusActivityCard({
+  university,
+  leaders,
+  loading,
+  error,
+  userId,
+}: {
+  university: string | null;
+  leaders: Leader[];
+  loading: boolean;
+  error: string | null;
+  userId: string;
+}) {
+  const myRank = leaders.findIndex((leader) => leader.user_id === userId);
+
+  return (
+    <section className="campus-activity-card" aria-live="polite">
+      <span className="eyebrow">Your campus this week</span>
+      {error ? (
+        <p role="status">Campus activity is unavailable right now.</p>
+      ) : loading ? (
+        <p role="status">Checking this week’s university rankings…</p>
+      ) : leaders.length ? (
+        <p>
+          {myRank >= 0
+            ? `You’re #${myRank + 1} at ${university} this week. ${leaders.length} students have earned points so far.`
+            : `${leaders.length} students at ${university} have earned points this week. Join them with a practice session.`}
+        </p>
+      ) : (
+        <p>No one from {university ?? "your university"} has scored this week yet. Be the first.</p>
+      )}
+    </section>
+  );
+}
+
+function UniversityBattleActivityCard({
+  university,
+  activity,
+  loading,
+  error,
+}: {
+  university: string | null;
+  activity: UniversityBattleActivity | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <section className="battle-social-proof" aria-live="polite">
+      <span className="eyebrow">{university || "Your university"} · last 7 days</span>
+      {error ? (
+        <p>Recent university battle activity is unavailable right now.</p>
+      ) : loading ? (
+        <p role="status">Checking recent university battles…</p>
+      ) : (
+        <>
+          {activity?.completed_battles_this_week !== null &&
+          activity?.completed_battles_this_week !== undefined ? (
+            <p>
+              <strong>{activity.completed_battles_this_week} battles</strong> completed at your
+              university recently. Start one with a classmate or share a link for later.
+            </p>
+          ) : activity?.recent_battles.length ? (
+            <p>Recent students at your university have started finishing battles together.</p>
+          ) : (
+            <p>
+              Every campus battle starts somewhere. Create a shareable invite and be among the first
+              students to finish one this week.
+            </p>
+          )}
+          {activity?.recent_battles.length ? (
+            <ol className="battle-social-proof-list">
+              {activity.recent_battles.map((battle) => (
+                <li key={`${battle.quiz_title}-${battle.completed_at}`}>
+                  <span>{battle.quiz_title}</span>
+                  <small>{new Date(battle.completed_at).toLocaleDateString()}</small>
+                </li>
+              ))}
+            </ol>
+          ) : null}
+        </>
       )}
     </section>
   );
@@ -1456,6 +2161,7 @@ function UsageMeter({
 
 function App() {
   const [route, setRoute] = useState<Route>(routeFromLocation);
+  const [pendingBattleId, setPendingBattleId] = useState(pendingBattleInviteFromLocation);
   const [verificationEmail, setVerificationEmail] = useState(
     () => window.sessionStorage.getItem("rimbly-verification-email") ?? "",
   );
@@ -1510,6 +2216,17 @@ function App() {
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<"weekly" | "all-time">("weekly");
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [campusLeaders, setCampusLeaders] = useState<Leader[]>([]);
+  const [campusLeadersLoading, setCampusLeadersLoading] = useState(false);
+  const [campusLeadersError, setCampusLeadersError] = useState<string | null>(null);
+  const [dailyChallengeLeaders, setDailyChallengeLeaders] = useState<DailyChallengeLeader[]>([]);
+  const [dailyChallengeLeadersLoading, setDailyChallengeLeadersLoading] = useState(false);
+  const [dailyChallengeLeadersError, setDailyChallengeLeadersError] = useState<string | null>(null);
+  const [utcDate, setUtcDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [homeGuideState, setHomeGuideState] = useState<{
+    userId: string | null;
+    dismissed: boolean;
+  }>({ userId: null, dismissed: true });
 
   const user = session?.user ?? null;
   const selectedCourse = courses.find((course) => course.id === selectedCourseId) ?? null;
@@ -1522,12 +2239,31 @@ function App() {
     () => sortQuizSetsForProfile(publishedQuizSets, profile),
     [publishedQuizSets, profile],
   );
+  const dailyChallenge = useMemo(() => {
+    const candidates = publishedQuizSets
+      .filter((quiz) => quiz.question_count >= 10)
+      .sort((first, second) => first.id.localeCompare(second.id));
+    if (!candidates.length) return null;
+    const dayIndex = Math.floor(Date.parse(`${utcDate}T00:00:00Z`) / 86_400_000);
+    return candidates[dayIndex % candidates.length];
+  }, [publishedQuizSets, utcDate]);
 
   const navigate = (next: Route) => {
     setError(null);
     setNotice(null);
     window.history.pushState({ route: next }, "", routeUrl(next));
     setRoute(next);
+  };
+
+  const dismissHomeGuide = () => {
+    if (!user) return;
+    window.localStorage.setItem(`rimbly-home-guide-dismissed:${user.id}`, "true");
+    setHomeGuideState({ userId: user.id, dismissed: true });
+  };
+
+  const clearPendingBattleInvite = () => {
+    window.sessionStorage.removeItem(pendingBattleInviteStorageKey);
+    setPendingBattleId(null);
   };
 
   const startProCheckout = async (planId: RimblyPlanId) => {
@@ -1638,7 +2374,7 @@ function App() {
         setNotifications([]);
         setContributions([]);
         setSavedCourseIds([]);
-        navigate("welcome");
+        if (event === "SIGNED_OUT") navigate("welcome");
       }
       setAuthReady(true);
     });
@@ -1694,9 +2430,21 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!user) {
+      setHomeGuideState({ userId: null, dismissed: true });
+      return;
+    }
+    setHomeGuideState({
+      userId: user.id,
+      dismissed: window.localStorage.getItem(`rimbly-home-guide-dismissed:${user.id}`) === "true",
+    });
+  }, [user?.id]);
+
+  useEffect(() => {
     if (!authReady) return;
     const publicRoutes: Route[] = [
       "welcome",
+      "explore",
       "signup",
       "login",
       "forgot-password",
@@ -1704,9 +2452,17 @@ function App() {
       "reset-password",
     ];
     if (user && publicRoutes.includes(route) && route !== "reset-password")
-      navigate(profile ? "home" : "onboarding");
+      navigate(
+        pendingBattleId ? (profile ? "battle" : "onboarding") : profile ? "home" : "onboarding",
+      );
     else if (!user && !publicRoutes.includes(route)) navigate("welcome");
-  }, [authReady, user, profile, route]);
+  }, [authReady, user, profile, route, pendingBattleId]);
+
+  useEffect(() => {
+    if (!user || route !== "battle" || !pendingBattleId) return;
+    window.sessionStorage.removeItem(pendingBattleInviteStorageKey);
+    setPendingBattleId(null);
+  }, [pendingBattleId, route, user?.id]);
 
   useEffect(() => {
     if (!user || !supabase) return;
@@ -1753,7 +2509,13 @@ function App() {
             route === "login" ||
             route === "verify-email"
           ) {
-            navigate(nextProfile?.university && nextProfile.level ? "home" : "onboarding");
+            navigate(
+              nextProfile?.university && nextProfile.level
+                ? pendingBattleId
+                  ? "battle"
+                  : "home"
+                : "onboarding",
+            );
           }
         },
       )
@@ -1769,6 +2531,19 @@ function App() {
     return () => {
       active = false;
     };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+    const interval = window.setInterval(() => {
+      const currentDate = new Date().toISOString().slice(0, 10);
+      setUtcDate((previousDate) => {
+        if (previousDate === currentDate) return previousDate;
+        void refreshRimblyBillingStatus();
+        return currentDate;
+      });
+    }, 30_000);
+    return () => window.clearInterval(interval);
   }, [user?.id]);
 
   useEffect(() => {
@@ -1863,7 +2638,8 @@ function App() {
   }, [route, user?.id]);
 
   useEffect(() => {
-    if (!user || !["quiz-setup", "paper", "profile"].includes(route)) return;
+    if (!user || !["home", "practice", "course", "quiz-setup", "paper", "profile"].includes(route))
+      return;
     let active = true;
     setPublishedQuizSetsLoading(true);
     void getPublishedQuizSets()
@@ -1883,6 +2659,65 @@ function App() {
       active = false;
     };
   }, [route, user?.id]);
+
+  useEffect(() => {
+    if (!user || route !== "home" || !profile?.university) {
+      setCampusLeaders([]);
+      setCampusLeadersError(null);
+      return;
+    }
+    let active = true;
+    setCampusLeadersLoading(true);
+    setCampusLeadersError(null);
+    void getLeaderboard(profile.university, "weekly")
+      .then((result) => {
+        if (active) setCampusLeaders(result);
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setCampusLeadersError(
+            loadError instanceof Error ? loadError.message : "Could not load campus activity.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setCampusLeadersLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [profile?.university, route, user?.id]);
+
+  useEffect(() => {
+    if (!user || route !== "home" || !dailyChallenge) {
+      setDailyChallengeLeaders([]);
+      setDailyChallengeLeadersError(null);
+      setDailyChallengeLeadersLoading(false);
+      return;
+    }
+    let active = true;
+    setDailyChallengeLeadersLoading(true);
+    setDailyChallengeLeadersError(null);
+    void getDailyChallengeLeaderboard(dailyChallenge.id)
+      .then((result) => {
+        if (active) setDailyChallengeLeaders(result);
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setDailyChallengeLeadersError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Could not load today’s challenge leaderboard.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setDailyChallengeLeadersLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempts.length, dailyChallenge?.id, route, user?.id, utcDate]);
 
   useEffect(() => {
     if (!user || !profile || route !== "leaderboard") return;
@@ -2014,12 +2849,10 @@ function App() {
     const password = String(form.get("password") ?? "");
     try {
       if (mode === "signup") {
-        const fullName = String(form.get("full_name") ?? "").trim();
         const { data, error: authError } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: { full_name: fullName },
             emailRedirectTo: routeUrl("onboarding"),
           },
         });
@@ -2038,7 +2871,7 @@ function App() {
         if (authError) throw authError;
         window.sessionStorage.removeItem("rimbly-verification-email");
         setVerificationEmail("");
-        navigate("home");
+        navigate(pendingBattleId ? "battle" : "home");
       }
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "Authentication failed.");
@@ -2129,7 +2962,7 @@ function App() {
       });
       setProfile(saved);
       setNotice("Your profile was saved.");
-      navigate(route === "onboarding" ? "home" : "profile");
+      navigate(route === "onboarding" ? (pendingBattleId ? "battle" : "home") : "profile");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save your profile.");
     } finally {
@@ -2525,6 +3358,10 @@ function App() {
     );
   }
 
+  if (route === "explore") {
+    return <GuestExplorePage configured={Boolean(supabase)} onNavigate={navigate} />;
+  }
+
   if (route === "welcome" || route === "signup" || route === "login") {
     if (route === "welcome") {
       return (
@@ -2561,7 +3398,11 @@ function App() {
               <br />
               starts here.
             </h2>
-            <p>Create an account to find published course papers and save your practice history.</p>
+            <p>
+              Try a sample question now, then create an account to find published papers and save
+              your progress.
+            </p>
+            <QuizPreview />
             {configurationBanner && (
               <p className="app-feedback" role="alert">
                 {configurationBanner}
@@ -2579,7 +3420,14 @@ function App() {
             <Button variant="secondary" disabled={!supabase} onClick={() => navigate("login")}>
               I already have an account
             </Button>
-            <small>Your courses and practice activity appear here as they are added.</small>
+            <button
+              className="guest-explore-link"
+              type="button"
+              onClick={() => navigate("explore")}
+            >
+              Explore courses without an account →
+            </button>
+            <small>Browse reviewed course coverage before you join.</small>
           </section>
         </div>
       );
@@ -2717,6 +3565,21 @@ function App() {
   const matchingPapers = selectedCourse
     ? papers.filter((paper) => paper.course_id === selectedCourse.id)
     : [];
+  const matchingCourseQuizzes = selectedCourse
+    ? publishedQuizSets.filter((quiz) => matchingPapers.some((paper) => paper.id === quiz.paper_id))
+    : [];
+  const activeQuiz = publishedQuizSets.find((quiz) => quiz.id === activeQuizSetId);
+  const activeQuizPaper = papers.find((paper) => paper.id === activeQuiz?.paper_id);
+  const activeQuizUniversity =
+    activeQuiz?.university ??
+    activeQuiz?.audience_university ??
+    courses.find((course) => course.id === activeQuizPaper?.course_id)?.university ??
+    "University context not provided";
+  const showHomeGuide =
+    route === "home" &&
+    homeGuideState.userId === user.id &&
+    !homeGuideState.dismissed &&
+    !publishedQuizSetsLoading;
   const paperCount = (courseId: string) =>
     papers.filter((paper) => paper.course_id === courseId).length;
 
@@ -2746,28 +3609,59 @@ function App() {
               ♧
             </button>
           </div>
-          <section className="home-primary-cta">
-            <div>
-              <span className="eyebrow">Make your next move</span>
-              <h2>Put your knowledge to the test.</h2>
-              <p>Start a published quiz or invite someone to a one-on-one battle.</p>
-            </div>
-            <div>
-              <Button onClick={() => navigate("quiz-setup")}>Start a quiz</Button>
-              <Button variant="secondary" onClick={() => navigate("battle")}>
-                Challenge someone
-              </Button>
-            </div>
-          </section>
+          {showHomeGuide && (
+            <FirstSessionGuide
+              quiz={prioritizedQuizSets[0] ?? null}
+              onStart={() => {
+                dismissHomeGuide();
+                void startQuiz(prioritizedQuizSets[0]?.id);
+              }}
+              onBrowse={() => navigate("quiz-setup")}
+              onBattle={() => {
+                dismissHomeGuide();
+                navigate("battle");
+              }}
+              onDismiss={dismissHomeGuide}
+            />
+          )}
           <DailyGoalCard
             status={billingStatus}
             progress={gameProgress}
             loading={billingStatusLoading}
             error={billingStatusError}
-            onQuiz={() => navigate("quiz-setup")}
-            onBattle={() => navigate("battle")}
+            hasQuiz={Boolean(dailyChallenge)}
+            showAction={!showHomeGuide}
+            onQuiz={() =>
+              dailyChallenge ? void startQuiz(dailyChallenge.id) : navigate("quiz-setup")
+            }
             onPlans={() => navigate("subscription")}
           />
+          <details className="home-progress-details home-community-details">
+            <summary>
+              <span>
+                <small>Campus activity</small>
+                <strong>Daily challenge and university rankings</strong>
+              </span>
+              <span className="home-progress-summary">Explore</span>
+            </summary>
+            <div className="home-community-details-content">
+              <DailyChallengeCard
+                quiz={dailyChallenge}
+                leaders={dailyChallengeLeaders}
+                leadersLoading={dailyChallengeLeadersLoading}
+                leadersError={dailyChallengeLeadersError}
+                userId={user.id}
+                onStart={() => void startQuiz(dailyChallenge?.id)}
+              />
+              <CampusActivityCard
+                university={profile.university}
+                leaders={campusLeaders}
+                loading={campusLeadersLoading}
+                error={campusLeadersError}
+                userId={user.id}
+              />
+            </div>
+          </details>
           <section>
             <div className="section-title">
               <div>
@@ -2783,6 +3677,7 @@ function App() {
                     key={course.id}
                     course={course}
                     paperCount={paperCount(course.id)}
+                    hasReviewedQuiz={courseHasReviewedQuiz(course, papers, publishedQuizSets)}
                     onClick={() => {
                       setSelectedCourseId(course.id);
                       navigate("course");
@@ -2790,6 +3685,8 @@ function App() {
                   />
                 ))}
               </div>
+            ) : loading ? (
+              <LoadingCards label="Loading your university courses" count={3} />
             ) : (
               <EmptyState
                 title="No courses yet"
@@ -2799,71 +3696,93 @@ function App() {
               />
             )}
           </section>
-          <section>
-            <div className="section-title">
-              <div>
-                <span>Your account</span>
-                <h2>Practice activity</h2>
+          <details className="home-progress-details">
+            <summary>
+              <span>
+                <small>Your account</small>
+                <strong>Progress and quiz history</strong>
+              </span>
+              <span className="home-progress-summary">
+                {attempts.length} {attempts.length === 1 ? "quiz" : "quizzes"}
+              </span>
+            </summary>
+            <section>
+              <div className="section-title">
+                <div>
+                  <span>Your account</span>
+                  <h2>Practice activity</h2>
+                </div>
+                <button onClick={() => navigate("quiz-history")}>Quiz history ›</button>
               </div>
-              <button onClick={() => navigate("quiz-history")}>Quiz history ›</button>
-            </div>
-            <div className="stats-grid">
-              <Stat icon="✓" value={String(attempts.length)} label="Saved quizzes" />
-              <Stat
-                icon="◎"
-                value={
-                  attempts.length
-                    ? `${Math.round(attempts.reduce((sum, item) => sum + item.score_percent, 0) / attempts.length)}%`
-                    : "—"
-                }
-                label="Average score"
-              />
-              <Stat icon="▤" value={String(papers.length)} label="Published papers" />
-              <Stat
-                icon="🔥"
-                value={
-                  gameProgressLoading
-                    ? "…"
-                    : gameProgress
-                      ? `${gameProgress.current_daily_streak} days`
+              <div className="stats-grid">
+                <Stat icon="✓" value={String(attempts.length)} label="Saved quizzes" />
+                <Stat
+                  icon="◎"
+                  value={
+                    attempts.length
+                      ? `${Math.round(attempts.reduce((sum, item) => sum + item.score_percent, 0) / attempts.length)}%`
                       : "—"
-                }
-                label="Daily streak"
-                tone="hot"
-              />
-            </div>
-            {gameProgressError && (
-              <p className="field-note" role="alert">
-                Daily streak unavailable: {gameProgressError}
-              </p>
-            )}
-          </section>
-          <section>
-            <div className="section-title">
-              <div>
-                <span>Saved from the database</span>
-                <h2>Recent quiz results</h2>
+                  }
+                  label="Average score"
+                />
+                <Stat
+                  icon="⚔"
+                  value={
+                    gameProgressLoading
+                      ? "…"
+                      : gameProgress
+                        ? `${gameProgress.current_win_streak} · best ${gameProgress.best_win_streak}`
+                        : "—"
+                  }
+                  label="Battle win streak"
+                  tone="hot"
+                />
+                <Stat
+                  icon="🔥"
+                  value={
+                    gameProgressLoading
+                      ? "…"
+                      : gameProgress
+                        ? `${gameProgress.current_daily_streak} days`
+                        : "—"
+                  }
+                  label="Daily streak"
+                  tone="hot"
+                />
               </div>
-            </div>
-            {attempts.length ? (
-              <div className="history-list">
-                {attempts.slice(0, 3).map((attempt) => (
-                  <AttemptRow
-                    key={attempt.id}
-                    attempt={attempt}
-                    paper={papers.find((item) => item.id === attempt.paper_id)}
-                  />
-                ))}
+              {gameProgressError && (
+                <p className="field-note" role="alert">
+                  Daily streak unavailable: {gameProgressError}
+                </p>
+              )}
+            </section>
+            <section>
+              <div className="section-title">
+                <div>
+                  <span>Saved from the database</span>
+                  <h2>Recent quiz results</h2>
+                </div>
               </div>
-            ) : (
-              <EmptyState
-                title="No quiz results yet"
-                text="Complete a quiz from an approved paper to see your progress here."
-                action="Find a paper"
-                onAction={() => navigate("practice")}
-              />
-            )}
-          </section>
+              {attempts.length ? (
+                <div className="history-list">
+                  {attempts.slice(0, 3).map((attempt) => (
+                    <AttemptRow
+                      key={attempt.id}
+                      attempt={attempt}
+                      paper={papers.find((item) => item.id === attempt.paper_id)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="No quiz results yet"
+                  text="Complete a quiz from an approved paper to see your progress here."
+                  action="Find a paper"
+                  onAction={() => navigate("practice")}
+                />
+              )}
+            </section>
+          </details>
         </>
       );
       break;
@@ -2873,6 +3792,9 @@ function App() {
         <PracticePage
           courses={prioritizedCourses}
           papers={papers}
+          quizzes={publishedQuizSets}
+          loading={loading || publishedQuizSetsLoading}
+          university={profile.university}
           onQuiz={() => navigate("quiz-setup")}
           onSelect={(course) => {
             setSelectedCourseId(course.id);
@@ -2900,7 +3822,15 @@ function App() {
             </p>
           </div>
           <div className="course-actions">
-            <Button onClick={() => navigate("quiz-setup")}>Choose a paper to practise</Button>
+            <Button
+              onClick={() =>
+                matchingCourseQuizzes.length
+                  ? void startQuiz(matchingCourseQuizzes[0].id)
+                  : navigate("quiz-setup")
+              }
+            >
+              {matchingCourseQuizzes.length ? "Start Quiz" : "Choose a paper to practise"}
+            </Button>
             <Button
               variant="secondary"
               disabled={busy}
@@ -3001,6 +3931,8 @@ function App() {
       content = questions.length ? (
         <QuizPage
           questions={questions}
+          quizTitle={activeQuiz?.title ?? "Reviewed quiz"}
+          university={activeQuizUniversity}
           answers={answers}
           busy={busy}
           setAnswer={(id, choice) => setAnswers((current) => ({ ...current, [id]: choice }))}
@@ -3280,6 +4212,7 @@ function App() {
                       key={course.id}
                       course={course}
                       paperCount={paperCount(course.id)}
+                      hasReviewedQuiz={courseHasReviewedQuiz(course, papers, publishedQuizSets)}
                       onClick={() => {
                         setSelectedCourseId(course.id);
                         navigate("course");
@@ -3305,9 +4238,7 @@ function App() {
               <button onClick={() => navigate("quiz-setup")}>Browse all ›</button>
             </div>
             {publishedQuizSetsLoading ? (
-              <p className="field-note" role="status">
-                Loading published quizzes…
-              </p>
+              <LoadingCards label="Loading published quizzes" />
             ) : prioritizedQuizSets.length ? (
               <div className="course-list quiz-catalog-grid">
                 {prioritizedQuizSets.map((quiz) => (
@@ -5832,12 +6763,18 @@ function AdminQuizWorkspace({
 function PracticePage({
   courses,
   papers,
+  quizzes,
+  loading,
+  university,
   onQuiz,
   onSelect,
   onNavigate,
 }: {
   courses: Course[];
   papers: Paper[];
+  quizzes: QuizSet[];
+  loading: boolean;
+  university: string | null;
   onQuiz: () => void;
   onSelect: (course: Course) => void;
   onNavigate: (route: Route) => void;
@@ -5846,6 +6783,7 @@ function PracticePage({
   const [level, setLevel] = useState("");
   const [faculty, setFaculty] = useState("");
   const [department, setDepartment] = useState("");
+  const [scope, setScope] = useState<"university" | "all">(university ? "university" : "all");
   const levels = Array.from(
     new Set(courses.map((course) => course.level).filter((value): value is string => !!value)),
   ).sort((a, b) => a.localeCompare(b));
@@ -5859,15 +6797,20 @@ function PracticePage({
     const matchesSearch =
       `${course.code} ${course.title} ${course.department ?? ""} ${course.university}`
         .toLowerCase()
-        .includes(search.toLowerCase());
+        .includes(search.trim().toLowerCase());
     return (
+      (scope === "all" ||
+        normalizeCatalogLabel(course.university) === normalizeCatalogLabel(university)) &&
       matchesSearch &&
       (!level || course.level === level) &&
       (!faculty || course.faculty === faculty) &&
       (!department || course.department === department)
     );
   });
-  const hasFilters = !!(search || level || faculty || department);
+  const hasFilters = Boolean(search.trim() || level || faculty || department);
+  const hasUniversityCourses = courses.some(
+    (course) => normalizeCatalogLabel(course.university) === normalizeCatalogLabel(university),
+  );
   const clearFilters = () => {
     setSearch("");
     setLevel("");
@@ -5878,12 +6821,27 @@ function PracticePage({
     <>
       <div className="page-head">
         <span className="eyebrow">Past questions library</span>
-        <h1>Practice with the whole library.</h1>
-        <p>
-          Courses from every department and university are included, with your study profile matches
-          first.
-        </p>
+        <h1>Find your next practice.</h1>
+        <p>Start with courses at your university, or switch to the full library.</p>
         <Button onClick={onQuiz}>Take a published quiz</Button>
+      </div>
+      <div className="segment course-scope-toggle" role="group" aria-label="Course library scope">
+        <button
+          type="button"
+          className={scope === "university" ? "active" : ""}
+          aria-pressed={scope === "university"}
+          onClick={() => setScope("university")}
+        >
+          My university
+        </button>
+        <button
+          type="button"
+          className={scope === "all" ? "active" : ""}
+          aria-pressed={scope === "all"}
+          onClick={() => setScope("all")}
+        >
+          All universities
+        </button>
       </div>
       <label className="search-field">
         <span aria-hidden="true">⌕</span>
@@ -5932,6 +6890,30 @@ function PracticePage({
             Clear filters
           </button>
         )}
+        {hasFilters && (
+          <div className="practice-filter-chips" aria-label="Active course filters">
+            {search.trim() && (
+              <button type="button" onClick={() => setSearch("")}>
+                Search: {search.trim()} <span aria-hidden="true">×</span>
+              </button>
+            )}
+            {level && (
+              <button type="button" onClick={() => setLevel("")}>
+                {level} <span aria-hidden="true">×</span>
+              </button>
+            )}
+            {faculty && (
+              <button type="button" onClick={() => setFaculty("")}>
+                {faculty} <span aria-hidden="true">×</span>
+              </button>
+            )}
+            {department && (
+              <button type="button" onClick={() => setDepartment("")}>
+                {department} <span aria-hidden="true">×</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <section>
         <div className="section-title">
@@ -5949,20 +6931,43 @@ function PracticePage({
                 key={course.id}
                 course={course}
                 paperCount={papers.filter((paper) => paper.course_id === course.id).length}
+                hasReviewedQuiz={courseHasReviewedQuiz(course, papers, quizzes)}
                 onClick={() => onSelect(course)}
               />
             ))}
           </div>
+        ) : loading ? (
+          <LoadingCards label="Loading courses in the practice library" />
         ) : (
           <EmptyState
-            title={courses.length ? "No matching courses" : "The library is empty"}
-            text={
-              courses.length
-                ? "Try a different search term or adjust your filters."
-                : "Ask an administrator to add courses to the study library."
+            title={
+              !courses.length
+                ? "The library is empty"
+                : scope === "university" && !hasUniversityCourses
+                  ? "No courses at your university yet"
+                  : "No matching courses"
             }
-            action={courses.length ? "Clear filters" : "Contribute a paper"}
-            onAction={() => (courses.length ? clearFilters() : onNavigate("contribute"))}
+            text={
+              !courses.length
+                ? "Ask an administrator to add courses to the study library."
+                : scope === "university" && !hasUniversityCourses
+                  ? "Explore courses from other universities while your local library grows."
+                  : "Try a different search term or adjust your filters."
+            }
+            action={
+              !courses.length
+                ? "Contribute a paper"
+                : scope === "university" && !hasUniversityCourses
+                  ? "Browse all universities"
+                  : "Clear filters"
+            }
+            onAction={() =>
+              !courses.length
+                ? onNavigate("contribute")
+                : scope === "university" && !hasUniversityCourses
+                  ? setScope("all")
+                  : clearFilters()
+            }
           />
         )}
       </section>
@@ -5983,7 +6988,20 @@ function BattlePage({
 }) {
   const [quizzes, setQuizzes] = useState<QuizSet[]>([]);
   const [opponents, setOpponents] = useState<Awaited<ReturnType<typeof getBattleOpponents>>>([]);
+  const [opponentsLoading, setOpponentsLoading] = useState(true);
   const [battles, setBattles] = useState<Battle[]>([]);
+  const [battlesLoading, setBattlesLoading] = useState(true);
+  const [universityBattleActivity, setUniversityBattleActivity] =
+    useState<UniversityBattleActivity | null>(null);
+  const [universityBattleActivityLoading, setUniversityBattleActivityLoading] = useState(true);
+  const [universityBattleActivityError, setUniversityBattleActivityError] = useState<string | null>(
+    null,
+  );
+  const [linkedInvite, setLinkedInvite] = useState<{
+    battleId: string;
+    invite: OpenBattleInvite;
+  } | null>(null);
+  const [linkedInviteLoading, setLinkedInviteLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [quizId, setQuizId] = useState("");
   const [activeBattleId, setActiveBattleId] = useState<string | null>(null);
@@ -5994,6 +7012,23 @@ function BattlePage({
   const [notice, setNotice] = useState<string | null>(null);
   const linkedChallengeId = new URLSearchParams(window.location.search).get("challenge");
   const previousBattlesRef = useRef<Battle[]>([]);
+  const opponentSearchRef = useRef<HTMLInputElement | null>(null);
+  const linkedInviteRequestedRef = useRef<string | null>(null);
+
+  const refreshUniversityBattleActivity = async () => {
+    try {
+      setUniversityBattleActivity(await getUniversityBattleActivity());
+      setUniversityBattleActivityError(null);
+    } catch (activityError) {
+      setUniversityBattleActivityError(
+        activityError instanceof Error
+          ? activityError.message
+          : "Could not load university battle activity.",
+      );
+    } finally {
+      setUniversityBattleActivityLoading(false);
+    }
+  };
 
   const refreshBattles = async () => {
     setBattles(await getBattles());
@@ -6019,14 +7054,21 @@ function BattlePage({
     }
   };
 
-  const copyChallengeLink = async (battleId: string) => {
+  const copyChallengeLink = async (
+    battleId: string,
+    openInvite = battles.find((battle) => battle.id === battleId)?.challenged_id === null,
+  ) => {
     const inviteUrl = new URL(window.location.href);
     inviteUrl.searchParams.set("route", "battle");
     inviteUrl.searchParams.set("challenge", battleId);
     try {
       await navigator.clipboard.writeText(inviteUrl.toString());
       setError(null);
-      setNotice("Challenge link copied. Share it so your classmate can open the pending match.");
+      setNotice(
+        openInvite
+          ? "Challenge link copied. Share it with an active student at your university; the invite expires in 7 days."
+          : "Challenge link copied. Share it with the classmate you challenged.",
+      );
     } catch (copyError) {
       setError(
         copyError instanceof Error
@@ -6044,6 +7086,36 @@ function BattlePage({
   }, [battles.length, linkedChallengeId]);
 
   useEffect(() => {
+    if (!linkedChallengeId || battlesLoading) return;
+    if (battles.some((battle) => battle.id === linkedChallengeId)) {
+      setLinkedInvite(null);
+      return;
+    }
+    if (linkedInviteRequestedRef.current === linkedChallengeId) return;
+
+    let active = true;
+    linkedInviteRequestedRef.current = linkedChallengeId;
+    setLinkedInviteLoading(true);
+    void getOpenBattleChallenge(linkedChallengeId)
+      .then((invite) => {
+        if (active) setLinkedInvite({ battleId: linkedChallengeId, invite });
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setError(
+            loadError instanceof Error ? loadError.message : "Could not load this battle invite.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setLinkedInviteLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [battles, battlesLoading, linkedChallengeId]);
+
+  useEffect(() => {
     let active = true;
     void Promise.all([getPublishedQuizSets(), getBattles()])
       .then(([nextQuizzes, nextBattles]) => {
@@ -6057,6 +7129,9 @@ function BattlePage({
           setError(
             loadError instanceof Error ? loadError.message : "Could not load the battle arena.",
           );
+      })
+      .finally(() => {
+        if (active) setBattlesLoading(false);
       });
     const interval = window.setInterval(() => {
       void getBattles()
@@ -6071,7 +7146,10 @@ function BattlePage({
           );
           previousBattlesRef.current = result;
           setBattles(result);
-          if (newlyCompleted) void refreshActivitySummary();
+          if (newlyCompleted) {
+            void refreshActivitySummary();
+            void refreshUniversityBattleActivity();
+          }
         })
         .catch((refreshError: unknown) => {
           if (active)
@@ -6088,6 +7166,32 @@ function BattlePage({
 
   useEffect(() => {
     let active = true;
+    setUniversityBattleActivityLoading(true);
+    setUniversityBattleActivityError(null);
+    void getUniversityBattleActivity()
+      .then((activity) => {
+        if (active) setUniversityBattleActivity(activity);
+      })
+      .catch((activityError: unknown) => {
+        if (active) {
+          setUniversityBattleActivityError(
+            activityError instanceof Error
+              ? activityError.message
+              : "Could not load university battle activity.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setUniversityBattleActivityLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+    setOpponentsLoading(true);
     const timer = window.setTimeout(() => {
       void getBattleOpponents(search)
         .then((result) => {
@@ -6098,6 +7202,9 @@ function BattlePage({
             setError(
               searchError instanceof Error ? searchError.message : "Could not find players.",
             );
+        })
+        .finally(() => {
+          if (active) setOpponentsLoading(false);
         });
     }, 250);
     return () => {
@@ -6147,7 +7254,49 @@ function BattlePage({
     }
   };
 
+  const createOpenInvite = async () => {
+    if (!quizId) {
+      setError("Choose a published quiz for your challenge.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const battleId = await createOpenBattleChallenge(quizId);
+      await refreshBattlesAfterAction("Invite created");
+      await onBillingRefresh();
+      await copyChallengeLink(battleId, true);
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error ? actionError.message : "Could not create this battle invite.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const acceptLinkedInvite = async () => {
+    if (!linkedInvite || linkedInvite.invite.status !== "open") return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await acceptOpenBattleChallenge(linkedInvite.battleId);
+      setLinkedInvite(null);
+      await refreshBattlesAfterAction("Battle invite accepted");
+      setNotice("Invite accepted. Start the shared quiz from your recent battles.");
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error ? actionError.message : "Could not accept this battle invite.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const rematch = async (battle: Battle) => {
+    if (!battle.challenged_id) return;
     const opponentId =
       battle.challenger_id === userId ? battle.challenged_id : battle.challenger_id;
     setBusy(true);
@@ -6202,6 +7351,7 @@ function BattlePage({
       );
       await refreshBattlesAfterAction("Battle answers saved");
       await refreshActivitySummary();
+      await refreshUniversityBattleActivity();
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : "Could not submit battle answers.",
@@ -6215,7 +7365,9 @@ function BattlePage({
     return (
       <section className="battle-workspace">
         <div className="page-head compact">
-          <span className="eyebrow">One-on-one · same questions</span>
+          <span className="eyebrow">
+            {university || "University"} · one-on-one · same questions
+          </span>
           <h1>Battle in progress.</h1>
           <p>More correct answers wins; equal scores are decided by faster time.</p>
         </div>
@@ -6276,11 +7428,17 @@ function BattlePage({
           {notice}
         </p>
       )}
+      <UniversityBattleActivityCard
+        university={university}
+        activity={universityBattleActivity}
+        loading={universityBattleActivityLoading}
+        error={universityBattleActivityError}
+      />
       <section className="battle-challenge-panel">
         <div>
           <span className="eyebrow">Your university</span>
           <h2>{university || "Complete your university profile to find players"}</h2>
-          <p>Challenges stay open until your classmate responds, even if they’re away.</p>
+          <p>Direct challenges wait for a response. Shareable invite links expire after 7 days.</p>
         </div>
         <label>
           <span>Shared quiz</span>
@@ -6293,17 +7451,32 @@ function BattlePage({
             ))}
           </select>
         </label>
+        <div className="battle-open-invite-action">
+          <Button
+            variant="secondary"
+            disabled={busy || !quizId}
+            onClick={() => void createOpenInvite()}
+          >
+            Create shareable invite link
+          </Button>
+          <small>Anyone with the link at your university can accept the challenge.</small>
+        </div>
         <label className="search-field">
           <span className="sr-only">Find a player at your university</span>
           <span aria-hidden="true">⌕</span>
           <input
+            ref={opponentSearchRef}
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Find a player at your university"
           />
         </label>
-        {opponents.length ? (
+        {opponentsLoading ? (
+          <p className="field-note" role="status">
+            Finding students at your university…
+          </p>
+        ) : opponents.length ? (
           <div className="battle-opponent-list">
             {opponents.map((opponent) => (
               <article key={opponent.user_id}>
@@ -6321,9 +7494,52 @@ function BattlePage({
             ))}
           </div>
         ) : (
-          <p className="field-note">No players found. Try searching by your classmate’s name.</p>
+          <p className="field-note">
+            No classmates found right now. Create a shareable link to challenge someone later.
+          </p>
         )}
       </section>
+      {linkedInviteLoading && (
+        <p className="field-note" role="status">
+          Checking this battle invite…
+        </p>
+      )}
+      {linkedInvite && (
+        <section className="battle-linked-invite">
+          <span className="eyebrow">University battle invite</span>
+          <h2>
+            {linkedInvite.invite.status === "open"
+              ? "You’ve been challenged."
+              : linkedInvite.invite.status === "owner"
+                ? "This is your invite link."
+                : linkedInvite.invite.status === "expired"
+                  ? "This invite has expired."
+                  : linkedInvite.invite.status === "claimed"
+                    ? "This invite has already been claimed."
+                    : "This invite is no longer available."}
+          </h2>
+          <p>
+            {linkedInvite.invite.quiz_title} · {linkedInvite.invite.challenger_name} ·{" "}
+            {linkedInvite.invite.university}
+          </p>
+          {linkedInvite.invite.status === "open" && (
+            <Button disabled={busy} onClick={() => void acceptLinkedInvite()}>
+              {busy ? "Accepting…" : "Accept and play"}
+            </Button>
+          )}
+          {linkedInvite.invite.status === "owner" && (
+            <Button
+              variant="secondary"
+              onClick={() => void copyChallengeLink(linkedInvite.battleId, true)}
+            >
+              Copy invite link
+            </Button>
+          )}
+          {linkedInvite.invite.status === "expired" && (
+            <small>Invite links can be accepted within 7 days of being created.</small>
+          )}
+        </section>
+      )}
       <section className="battle-matches">
         <div className="admin-section-heading">
           <div>
@@ -6334,26 +7550,36 @@ function BattlePage({
             Refresh
           </Button>
         </div>
-        {battles.length ? (
+        {battlesLoading ? (
+          <p className="field-note" role="status">
+            Loading your recent battles…
+          </p>
+        ) : battles.length ? (
           battles.map((battle) => {
             const incoming = battle.challenged_id === userId && battle.status === "pending";
             const outgoing = battle.challenger_id === userId && battle.status === "pending";
             const otherName =
-              battle.challenger_id === userId ? battle.challenged_name : battle.challenger_name;
+              battle.challenger_id === userId
+                ? battle.challenged_name || "a classmate"
+                : battle.challenger_name;
             const statusLabel = incoming
               ? "Your turn"
               : outgoing
-                ? "Waiting for response"
+                ? battle.challenged_id
+                  ? "Waiting for response"
+                  : "Open invite · 7 days"
                 : battle.status === "active"
                   ? "In progress"
                   : battle.status === "completed"
                     ? "Completed"
-                    : battle.status === "declined"
-                      ? "Declined"
-                      : "Cancelled";
+                    : battle.status === "expired"
+                      ? "Expired"
+                      : battle.status === "declined"
+                        ? "Declined"
+                        : "Cancelled";
             return (
               <article
-                className={`battle-match-row ${battle.id === linkedChallengeId ? "battle-invite-target" : ""}`}
+                className={`battle-match-row ${battle.id === linkedChallengeId ? "battle-invite-target" : ""} ${battle.status === "completed" && battle.winner_id === userId ? "battle-won" : ""}`}
                 id={`battle-${battle.id}`}
                 key={battle.id}
               >
@@ -6366,7 +7592,7 @@ function BattlePage({
                   </small>
                 </div>
                 <span
-                  className={`badge ${battle.status === "completed" ? "badge-purple" : "badge-amber"}`}
+                  className={`badge ${battle.status === "completed" ? "badge-purple" : battle.status === "expired" || battle.status === "cancelled" ? "badge-red" : "badge-amber"}`}
                   aria-label={`Battle status: ${statusLabel}`}
                 >
                   {statusLabel}
@@ -6394,7 +7620,11 @@ function BattlePage({
                   <>
                     <Button
                       variant="secondary"
-                      ariaLabel={`Copy invite link for ${otherName}`}
+                      ariaLabel={
+                        battle.challenged_id
+                          ? `Copy invite link for ${otherName}`
+                          : "Copy university battle invite link"
+                      }
                       onClick={() => void copyChallengeLink(battle.id)}
                     >
                       Copy invite link
@@ -6454,6 +7684,11 @@ function BattlePage({
                             ? "Victory"
                             : "Defeat"}
                       </strong>
+                      {battle.winner_id === userId && (
+                        <span className="battle-victory-check" aria-label="Victory">
+                          ✓
+                        </span>
+                      )}
                       <small>
                         You {battle.your_correct_count ?? 0} correct in{" "}
                         {(battle.your_duration_seconds ?? 0).toFixed(2)}s{" · "}
@@ -6476,8 +7711,10 @@ function BattlePage({
           })
         ) : (
           <EmptyState
-            title="No challenges yet"
-            text="Choose a reviewed quiz and challenge an active student at your university."
+            title="Be the first to start a battle"
+            text="Start a direct challenge or create a shareable university invite link for someone to accept later."
+            action="Find a classmate"
+            onAction={() => opponentSearchRef.current?.focus()}
           />
         )}
       </section>
@@ -6508,7 +7745,9 @@ function PaperRow({
           {paper.exam_year ?? "Not specified"}
         </small>
       </span>
-      <span className="badge badge-green">{paper.is_verified ? "Verified" : "Published"}</span>
+      <span className={`badge ${paper.is_verified ? "badge-green" : ""}`}>
+        {paper.is_verified ? "Verified paper" : "Published · not verified"}
+      </span>
       <span aria-hidden="true">›</span>
     </button>
   );
@@ -6606,7 +7845,19 @@ function PaperPage({
           </div>
           <div>
             <dt>Status</dt>
-            <dd>{paper.is_verified ? "Verified" : "Published"}</dd>
+            <dd>{paper.is_verified ? "Verified source paper" : "Published source paper"}</dd>
+          </div>
+          <div>
+            <dt>Question set</dt>
+            <dd>
+              {quizStatus === "ready"
+                ? "Reviewed questions available"
+                : quizStatus === "missing"
+                  ? "Original paper only · no reviewed quiz yet"
+                  : quizStatus === "error"
+                    ? "Could not check for reviewed questions"
+                    : "Checking for reviewed questions…"}
+            </dd>
           </div>
         </dl>
       </section>
@@ -6635,7 +7886,9 @@ function PaperPage({
       <div className="paper-cta">
         <div>
           <h3>Ready to practise?</h3>
-          <p>Put your knowledge to work with a reviewed quiz or challenge a classmate in Battle.</p>
+          <p>
+            Take the reviewed quiz when available, or create a shareable university battle invite.
+          </p>
         </div>
         <Button
           disabled={
@@ -6651,7 +7904,7 @@ function PaperPage({
             : quizStatus === "ready"
               ? "Take quiz"
               : quizStatus === "missing"
-                ? "No quiz available"
+                ? "Quiz not ready yet"
                 : quizStatus === "error"
                   ? "Quiz check failed"
                   : "Retry quiz check"}
@@ -6756,12 +8009,16 @@ function ProtectedDocumentSurface({
 
 function QuizPage({
   questions,
+  quizTitle,
+  university,
   answers,
   busy,
   setAnswer,
   onSubmit,
 }: {
   questions: PublicQuestion[];
+  quizTitle: string;
+  university: string;
   answers: Record<string, number>;
   busy: boolean;
   setAnswer: (questionId: string, index: number) => void;
@@ -6775,18 +8032,24 @@ function QuizPage({
   return (
     <div className="focus-page">
       <header>
-        <span>
-          Question {index + 1} of {questions.length}
-        </span>
-        <div
-          className="progress"
-          role="progressbar"
-          aria-label="Quiz question progress"
-          aria-valuemin={1}
-          aria-valuemax={questions.length}
-          aria-valuenow={index + 1}
-        >
-          <span style={{ width: `${progressPercent}%` }} />
+        <div className="quiz-session-context">
+          <strong>{quizTitle}</strong>
+          <small>{university}</small>
+        </div>
+        <div className="quiz-progress-meta">
+          <span>
+            Question {index + 1} of {questions.length}
+          </span>
+          <div
+            className="progress"
+            role="progressbar"
+            aria-label="Quiz question progress"
+            aria-valuemin={1}
+            aria-valuemax={questions.length}
+            aria-valuenow={index + 1}
+          >
+            <span style={{ width: `${progressPercent}%` }} />
+          </div>
         </div>
         <button
           className="btn btn-secondary"
@@ -6894,8 +8157,21 @@ function ResultsPage({
 
   return (
     <>
-      <div className="result-hero">
-        <span className="badge badge-green">Quiz saved</span>
+      <div className={`result-hero ${attempt.score_percent === 100 ? "perfect-score" : ""}`}>
+        {attempt.score_percent === 100 && (
+          <div className="score-celebration" aria-hidden="true">
+            <span>✦</span>
+            <span>✧</span>
+            <span>✦</span>
+            <span>✧</span>
+          </div>
+        )}
+        <span className="result-complete-mark" aria-hidden="true">
+          ✓
+        </span>
+        <span className="badge badge-green">
+          {attempt.score_percent === 100 ? "Perfect score · Quiz saved" : "Quiz saved"}
+        </span>
         <h1>{attempt.score_percent}%</h1>
         <p>
           {attempt.correct_count} correct out of {attempt.total_questions}
@@ -6910,7 +8186,9 @@ function ResultsPage({
           {new Date(attempt.created_at).toLocaleString()}
         </div>
         {attempt.points_earned !== undefined && (
-          <div className="xp-pill">{attempt.points_earned} points earned</div>
+          <div className="xp-pill">
+            {attempt.points_earned} points earned · 10 per correct answer
+          </div>
         )}
         {improvement !== null && (
           <p className="score-comparison" role="status">
@@ -7078,7 +8356,15 @@ function GameProgressPanel({
       description: "Perfect score at 10 seconds per question or faster",
       icon: "↯",
     },
+    { id: "daily_3", name: "3-day Starter", description: "Practice 3 days in a row", icon: "✦" },
     { id: "daily_7", name: "7-day Scholar", description: "Practice 7 days in a row", icon: "🔥" },
+    {
+      id: "daily_14",
+      name: "14-day Achiever",
+      description: "Practice 14 days in a row",
+      icon: "◆",
+    },
+    { id: "daily_30", name: "30-day Scholar", description: "Practice 30 days in a row", icon: "★" },
   ] as const;
   const earnedBadgeIds = new Set(progress?.badges.map((badge) => badge.badge_id) ?? []);
 
@@ -7125,7 +8411,12 @@ function GameProgressPanel({
           <TitleProgress progress={progress} />
           <div className="game-badge-list" aria-label="Badges">
             {badgeDefinitions.map((badge) => {
-              const isEarned = earnedBadgeIds.has(badge.id);
+              const milestoneDays = badge.id.startsWith("daily_")
+                ? Number(badge.id.slice("daily_".length))
+                : null;
+              const isEarned =
+                earnedBadgeIds.has(badge.id) ||
+                (milestoneDays !== null && progress.best_daily_streak >= milestoneDays);
               const earnedAt = progress?.badges.find(
                 (item) => item.badge_id === badge.id,
               )?.earned_at;
@@ -7137,7 +8428,9 @@ function GameProgressPanel({
                     <small>
                       {isEarned && earnedAt
                         ? `Earned ${new Date(earnedAt).toLocaleDateString()}`
-                        : badge.description}
+                        : isEarned
+                          ? "Unlocked with your best daily streak"
+                          : badge.description}
                     </small>
                   </div>
                   {isEarned && <b aria-label="Earned">✓</b>}

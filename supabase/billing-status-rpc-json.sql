@@ -66,7 +66,10 @@ begin
     'plan_id', case when active_pro then subscription.plan_id else 'free' end,
     'expires_at', case when active_pro then subscription.expires_at else null end,
     'quizzes_used_today', coalesce(quiz_count, 0),
-    'free_quiz_limit', 5,
+    'free_quiz_limit', case
+      when coalesce(quiz_count, 0) > 0 or coalesce(completed_battles_today, 0) > 0 then 6
+      else 5
+    end,
     'battle_invites_used_today', coalesce(battle_count, 0),
     'free_battle_limit', 3,
     'completed_battles_today', coalesce(completed_battles_today, 0),

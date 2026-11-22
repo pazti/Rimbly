@@ -24,6 +24,34 @@ export interface Course {
   is_verified: boolean;
 }
 
+export interface GuestExploreCourse {
+  id: string;
+  code: string;
+  title: string;
+  university: string;
+  faculty: string | null;
+  department: string | null;
+  level: string | null;
+  is_verified: boolean;
+  paper_count: number;
+  has_reviewed_quiz: boolean;
+}
+
+export interface GuestExploreQuiz {
+  id: string;
+  title: string;
+  description: string;
+  course_code: string | null;
+  course_title: string | null;
+  university: string | null;
+  question_count: number;
+}
+
+export interface GuestExploreCatalog {
+  courses: GuestExploreCourse[];
+  quizzes: GuestExploreQuiz[];
+}
+
 export interface Paper {
   id: string;
   course_id: string;
@@ -135,6 +163,15 @@ export interface Leader {
   is_pro?: boolean;
 }
 
+export interface DailyChallengeLeader {
+  user_id: string;
+  full_name: string;
+  score_percent: number;
+  correct_count: number;
+  total_questions: number;
+  duration_seconds: number;
+}
+
 export interface RimblyBillingStatus {
   is_pro: boolean;
   plan_id: RimblyPlanId | "free";
@@ -160,7 +197,14 @@ export interface QuizAttemptReviewItem {
 }
 
 export interface PlayerBadge {
-  badge_id: "first_win" | "perfect_score" | "speed_demon" | "daily_7";
+  badge_id:
+    | "first_win"
+    | "perfect_score"
+    | "speed_demon"
+    | "daily_3"
+    | "daily_7"
+    | "daily_14"
+    | "daily_30";
   earned_at: string;
 }
 
@@ -190,9 +234,9 @@ export interface Battle {
   quiz_title: string;
   challenger_id: string;
   challenger_name: string;
-  challenged_id: string;
-  challenged_name: string;
-  status: "pending" | "active" | "completed" | "declined" | "cancelled";
+  challenged_id: string | null;
+  challenged_name: string | null;
+  status: "pending" | "active" | "completed" | "declined" | "cancelled" | "expired";
   winner_id: string | null;
   is_draw: boolean;
   your_submission: boolean;
@@ -202,6 +246,18 @@ export interface Battle {
   your_duration_seconds: number | null;
   opponent_duration_seconds: number | null;
   created_at: string;
+}
+
+export interface OpenBattleInvite {
+  status: "open" | "expired" | "claimed" | "cancelled" | "owner";
+  quiz_title: string;
+  challenger_name: string;
+  university: string;
+}
+
+export interface UniversityBattleActivity {
+  completed_battles_this_week: number | null;
+  recent_battles: Array<{ quiz_title: string; completed_at: string }>;
 }
 
 export interface AppNotification {
@@ -356,6 +412,61 @@ export async function getCourses() {
   return (data ?? []) as Course[];
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isGuestExploreCatalog = (value: unknown): value is GuestExploreCatalog => {
+  if (!isRecord(value) || !Array.isArray(value.courses) || !Array.isArray(value.quizzes)) {
+    return false;
+  }
+  const validOptionalString = (item: unknown) => item === null || typeof item === "string";
+  return (
+    value.courses.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.id === "string" &&
+        typeof item.code === "string" &&
+        typeof item.title === "string" &&
+        typeof item.university === "string" &&
+        validOptionalString(item.faculty) &&
+        validOptionalString(item.department) &&
+        validOptionalString(item.level) &&
+        typeof item.is_verified === "boolean" &&
+        typeof item.paper_count === "number" &&
+        Number.isInteger(item.paper_count) &&
+        typeof item.has_reviewed_quiz === "boolean",
+    ) &&
+    value.quizzes.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.id === "string" &&
+        typeof item.title === "string" &&
+        typeof item.description === "string" &&
+        validOptionalString(item.course_code) &&
+        validOptionalString(item.course_title) &&
+        validOptionalString(item.university) &&
+        typeof item.question_count === "number" &&
+        Number.isInteger(item.question_count),
+    )
+  );
+};
+
+export async function getGuestExploreCatalog(): Promise<GuestExploreCatalog> {
+  const { data, error } = await requireSupabase().rpc("get_guest_explore_catalog");
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Guest Explore has not been enabled for this database. Apply supabase/guest-explore.sql through the authorized migration workflow.",
+      );
+    }
+    throw error;
+  }
+  if (!isGuestExploreCatalog(data)) {
+    throw new Error("Guest Explore returned an invalid catalog response.");
+  }
+  return data;
+}
+
 export async function getUniversities() {
   const { data, error } = await requireSupabase()
     .from("universities")
@@ -498,6 +609,14 @@ export async function getLeaderboard(
   });
   if (error) throw error;
   return (data ?? []) as Leader[];
+}
+
+export async function getDailyChallengeLeaderboard(quizId: string) {
+  const { data, error } = await requireSupabase().rpc("get_daily_challenge_leaderboard", {
+    p_quiz_id: quizId,
+  });
+  if (error) throw error;
+  return (data ?? []) as DailyChallengeLeader[];
 }
 
 export async function getGameProgress() {
@@ -897,10 +1016,91 @@ export async function createBattle(quizId: string, opponentId: string) {
   return data as string;
 }
 
+export async function createOpenBattleChallenge(quizId: string) {
+  const { data, error } = await requireSupabase().rpc("create_open_battle_challenge", {
+    p_quiz_id: quizId,
+  });
+  if (error) throw error;
+  if (typeof data !== "string") {
+    throw new Error("The server returned an invalid battle invite.");
+  }
+  return data;
+}
+
+export async function getOpenBattleChallenge(battleId: string): Promise<OpenBattleInvite> {
+  const { data, error } = await requireSupabase().rpc("get_open_battle_challenge", {
+    p_battle_id: battleId,
+  });
+  if (error) throw error;
+  const invite = Array.isArray(data) ? data[0] : null;
+  const inviteStatuses: OpenBattleInvite["status"][] = [
+    "open",
+    "expired",
+    "claimed",
+    "cancelled",
+    "owner",
+  ];
+  if (
+    !isRecord(invite) ||
+    typeof invite.status !== "string" ||
+    !inviteStatuses.includes(invite.status as OpenBattleInvite["status"]) ||
+    typeof invite.quiz_title !== "string" ||
+    typeof invite.challenger_name !== "string" ||
+    typeof invite.university !== "string"
+  ) {
+    throw new Error("The server returned an invalid battle invite.");
+  }
+  return {
+    status: invite.status as OpenBattleInvite["status"],
+    quiz_title: invite.quiz_title,
+    challenger_name: invite.challenger_name,
+    university: invite.university,
+  };
+}
+
+export async function acceptOpenBattleChallenge(battleId: string) {
+  const { error } = await requireSupabase().rpc("accept_open_battle_challenge", {
+    p_battle_id: battleId,
+  });
+  if (error) throw error;
+}
+
 export async function getBattles() {
   const { data, error } = await requireSupabase().rpc("list_my_battles");
   if (error) throw error;
   return (data ?? []) as Battle[];
+}
+
+export async function getUniversityBattleActivity(): Promise<UniversityBattleActivity> {
+  const { data, error } = await requireSupabase().rpc("get_university_battle_activity");
+  if (error) throw error;
+  const activity = Array.isArray(data) ? data[0] : null;
+  if (
+    !isRecord(activity) ||
+    (activity.completed_battles_this_week !== null &&
+      (typeof activity.completed_battles_this_week !== "number" ||
+        !Number.isInteger(activity.completed_battles_this_week) ||
+        activity.completed_battles_this_week < 0)) ||
+    !Array.isArray(activity.recent_battles) ||
+    activity.recent_battles.some(
+      (battle) =>
+        !isRecord(battle) ||
+        typeof battle.quiz_title !== "string" ||
+        typeof battle.completed_at !== "string",
+    )
+  ) {
+    throw new Error("The server returned invalid university battle activity.");
+  }
+  return {
+    completed_battles_this_week:
+      activity.completed_battles_this_week === null
+        ? null
+        : Number(activity.completed_battles_this_week),
+    recent_battles: activity.recent_battles.map((battle) => ({
+      quiz_title: String(battle.quiz_title),
+      completed_at: String(battle.completed_at),
+    })),
+  };
 }
 
 export async function respondToBattle(battleId: string, accept: boolean) {

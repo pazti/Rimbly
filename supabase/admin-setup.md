@@ -35,7 +35,15 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    Home daily-goal card also reads remaining allowance and today's completed
    practice from the monetization status function.
 8. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
-   database access gate.
+   database access gate. Then apply `guest-explore.sql` to expose a bounded,
+   read-only course and reviewed-quiz catalog to signed-out visitors. The public
+   function does not return source file paths, question contents, or answer keys.
+   Apply `open-battle-invites.sql` after `quiz-battles.sql`,
+   `monetization.sql`, and `maintenance-mode.sql` to enable shareable university
+   battle links and a privacy-preserving recent campus battle feed. Open links
+   expire after seven days and can only be accepted by active students at the
+   inviter's university; the feed shows only recent quiz titles and dates, never
+   player names.
 9. Deploy the two Supabase Edge Functions from the repository root:
 
    ```sh
@@ -77,7 +85,12 @@ supabase secrets set --project-ref YOUR_PROJECT_REF \
     before enabling production keys.
 
 13. Add the same app URL to Supabase Auth's allowed redirect URLs. Invitations
-    redirect to `APP_URL/#/admin`.
+    redirect to `APP_URL/#/admin`. To remove the email-confirmation gate, open
+    Supabase Dashboard → Authentication → Providers → Email and turn off
+    **Confirm email**. The app already continues directly to profile setup when
+    Supabase returns a session after signup. This hosted Auth setting cannot be
+    changed from the repository; if it stays enabled, signups will still need to
+    confirm and can use Guest Explore while waiting.
 14. Keep the existing Super Admin membership assigned explicitly to a trusted
     user. Do not assign privileged roles from client-side profile metadata.
 
