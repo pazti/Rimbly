@@ -89,12 +89,18 @@ begin
     raise exception 'An active signed-in account is required' using errcode = '42501';
   end if;
 
-  select battle, quiz.title, profile.full_name, profile.university
-  into challenge, challenge_quiz_title, challenge_name, challenge_university
+  select battle.* into challenge
   from public.battle_challenges battle
-  join public.quiz_sets quiz on quiz.id = battle.quiz_id
-  join public.profiles profile on profile.id = battle.challenger_id
   where battle.id = p_battle_id;
+  if not found then
+    raise exception 'This battle invite could not be found';
+  end if;
+
+  select quiz.title, profile.full_name, profile.university
+  into challenge_quiz_title, challenge_name, challenge_university
+  from public.quiz_sets quiz
+  join public.profiles profile on profile.id = challenge.challenger_id
+  where quiz.id = challenge.quiz_id;
   if not found then
     raise exception 'This battle invite could not be found';
   end if;

@@ -5909,6 +5909,56 @@ select {
   line-height: 1.5;
 }
 
+.battle-opponent-disclosure {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.battle-opponent-disclosure summary {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.battle-opponent-disclosure summary::before {
+  content: "›";
+  color: var(--purple-dark);
+  font-size: 22px;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.battle-opponent-disclosure[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.battle-opponent-disclosure summary small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  text-align: right;
+}
+
+.battle-opponent-disclosure[open] {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.battle-opponent-disclosure[open] summary {
+  margin: 0 -14px;
+  border-bottom: 1px solid var(--line);
+}
+
 .battle-linked-invite {
   padding: clamp(16px, 3vw, 24px);
   border: 1px solid var(--purple);

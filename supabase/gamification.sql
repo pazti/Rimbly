@@ -467,6 +467,7 @@ end;
 $$;
 
 drop function if exists public.get_game_leaderboard(text);
+drop function if exists public.get_game_leaderboard(text, text);
 create or replace function public.get_game_leaderboard(p_university text, p_period text)
 returns table (
   user_id uuid,

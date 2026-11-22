@@ -6988,7 +6988,8 @@ function BattlePage({
 }) {
   const [quizzes, setQuizzes] = useState<QuizSet[]>([]);
   const [opponents, setOpponents] = useState<Awaited<ReturnType<typeof getBattleOpponents>>>([]);
-  const [opponentsLoading, setOpponentsLoading] = useState(true);
+  const [opponentsLoading, setOpponentsLoading] = useState(false);
+  const [opponentsOpen, setOpponentsOpen] = useState(false);
   const [battles, setBattles] = useState<Battle[]>([]);
   const [battlesLoading, setBattlesLoading] = useState(true);
   const [universityBattleActivity, setUniversityBattleActivity] =
@@ -7190,6 +7191,7 @@ function BattlePage({
   }, [userId]);
 
   useEffect(() => {
+    if (!opponentsOpen) return;
     let active = true;
     setOpponentsLoading(true);
     const timer = window.setTimeout(() => {
@@ -7211,7 +7213,7 @@ function BattlePage({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [search]);
+  }, [opponentsOpen, search]);
 
   const respond = async (battleId: string, accept: boolean) => {
     setBusy(true);
@@ -7461,43 +7463,56 @@ function BattlePage({
           </Button>
           <small>Anyone with the link at your university can accept the challenge.</small>
         </div>
-        <label className="search-field">
-          <span className="sr-only">Find a player at your university</span>
-          <span aria-hidden="true">⌕</span>
-          <input
-            ref={opponentSearchRef}
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Find a player at your university"
-          />
-        </label>
-        {opponentsLoading ? (
-          <p className="field-note" role="status">
-            Finding students at your university…
-          </p>
-        ) : opponents.length ? (
-          <div className="battle-opponent-list">
-            {opponents.map((opponent) => (
-              <article key={opponent.user_id}>
-                <span className="avatar">
-                  {(opponent.full_name || "S").slice(0, 1).toUpperCase()}
-                </span>
-                <div>
-                  <strong>{opponent.full_name || "Student"}</strong>
-                  <small>{opponent.university}</small>
-                </div>
-                <Button disabled={busy || !quizId} onClick={() => void challenge(opponent.user_id)}>
-                  Challenge
-                </Button>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="field-note">
-            No classmates found right now. Create a shareable link to challenge someone later.
-          </p>
-        )}
+        <details
+          className="battle-opponent-disclosure"
+          open={opponentsOpen}
+          onToggle={(event) => setOpponentsOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <span>Challenge a student</span>
+            <small>Browse classmates at your university</small>
+          </summary>
+          <label className="search-field">
+            <span className="sr-only">Find a player at your university</span>
+            <span aria-hidden="true">⌕</span>
+            <input
+              ref={opponentSearchRef}
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Find a player at your university"
+            />
+          </label>
+          {opponentsLoading ? (
+            <p className="field-note" role="status">
+              Finding students at your university…
+            </p>
+          ) : opponents.length ? (
+            <div className="battle-opponent-list">
+              {opponents.map((opponent) => (
+                <article key={opponent.user_id}>
+                  <span className="avatar">
+                    {(opponent.full_name || "S").slice(0, 1).toUpperCase()}
+                  </span>
+                  <div>
+                    <strong>{opponent.full_name || "Student"}</strong>
+                    <small>{opponent.university}</small>
+                  </div>
+                  <Button
+                    disabled={busy || !quizId}
+                    onClick={() => void challenge(opponent.user_id)}
+                  >
+                    Challenge
+                  </Button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="field-note">
+              No classmates found right now. Create a shareable link to challenge someone later.
+            </p>
+          )}
+        </details>
       </section>
       {linkedInviteLoading && (
         <p className="field-note" role="status">
@@ -7714,7 +7729,10 @@ function BattlePage({
             title="Be the first to start a battle"
             text="Start a direct challenge or create a shareable university invite link for someone to accept later."
             action="Find a classmate"
-            onAction={() => opponentSearchRef.current?.focus()}
+            onAction={() => {
+              setOpponentsOpen(true);
+              window.setTimeout(() => opponentSearchRef.current?.focus(), 0);
+            }}
           />
         )}
       </section>
