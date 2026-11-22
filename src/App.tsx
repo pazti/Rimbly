@@ -1,8 +1,9 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   AppNotification,
   AdminAccess,
+  AdminActivationMetrics,
   AdminAuditLog,
   AdminContribution,
   archiveAdminQuizSet,
@@ -38,6 +39,7 @@ import {
   getCourses,
   getAdminQuizDraft,
   getAdminAccess,
+  getAdminActivationMetrics,
   getAdminAuditLogs,
   getAdminContributions,
   getAdminContributionUrl,
@@ -48,6 +50,7 @@ import {
   getAdminTeam,
   getAdminUniversities,
   getAdminOverview,
+  recordReviewedQuizActivation,
   getMaintenanceStatus,
   deleteAdminPaper,
   inviteAdmin,
@@ -367,16 +370,16 @@ function FirstSessionGuide({
       </ol>
       <div className="home-preview-ghost" aria-label="Preview of your progress after you practise">
         <div>
-          <strong>0 days</strong>
-          <small>Daily streak</small>
+          <strong>1 reviewed quiz</strong>
+          <small>Your first study win</small>
         </div>
         <div>
-          <strong>—</strong>
-          <small>Quiz scores</small>
+          <strong>Score + review</strong>
+          <small>See what you know</small>
         </div>
         <div>
-          <strong>Join in</strong>
-          <small>Campus rankings</small>
+          <strong>Progress saved</strong>
+          <small>Build from here</small>
         </div>
       </div>
       <div className="first-session-actions">
@@ -386,7 +389,7 @@ function FirstSessionGuide({
         <button type="button" className="text-button" onClick={onBattle}>
           Explore Battle
         </button>
-        <button type="button" className="text-button" onClick={onDismiss}>
+        <button type="button" className="guide-skip" onClick={onDismiss}>
           Skip this guide
         </button>
       </div>
@@ -394,17 +397,19 @@ function FirstSessionGuide({
   );
 }
 
-function QuizPreview() {
+function QuizPreview({ onCreateAccount }: { onCreateAccount: () => void }) {
   const sampleQuestions = [
     {
-      prompt: "Which habit helps build lasting study progress?",
-      options: ["Study a little every day", "Wait until exam week", "Skip difficult topics"],
+      prompt: "Solve for x: 3x − 5 = 16.",
+      options: ["7", "9", "11", "12"],
       correctIndex: 0,
+      explanation: "Add 5 to both sides, then divide by 3: x = 21 ÷ 3 = 7.",
     },
     {
-      prompt: "What is a useful next step after a practice quiz?",
-      options: ["Review missed answers", "Forget the result", "Avoid the topic"],
-      correctIndex: 0,
+      prompt: "A class has 40 students. If 25% are absent, how many are present?",
+      options: ["10", "25", "30", "35"],
+      correctIndex: 2,
+      explanation: "25% of 40 is 10 absent, so 40 − 10 = 30 students are present.",
     },
   ];
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -424,7 +429,7 @@ function QuizPreview() {
   return (
     <section className="quiz-preview" aria-label="Interactive sample quiz">
       <div className="quiz-preview-heading">
-        <span className="eyebrow">Try a sample quiz</span>
+        <span className="eyebrow">Exam-style sample</span>
         <span className="badge badge-purple">
           Question {questionIndex + 1} of {sampleQuestions.length}
         </span>
@@ -448,12 +453,23 @@ function QuizPreview() {
         ))}
       </div>
       {submitted && (
-        <p className="quiz-preview-result" role="status">
-          You got {score} of {sampleQuestions.length} correct.{" "}
-          {score === sampleQuestions.length
-            ? "Nice work—review is how learning sticks."
-            : "Reviewing missed answers helps make the next attempt stronger."}
-        </p>
+        <div className="quiz-preview-review" role="status">
+          <p className="quiz-preview-result">
+            {score === sampleQuestions.length
+              ? "Perfect sample score"
+              : `${score} of ${sampleQuestions.length} correct`}
+            {" · "}Here’s the answer review:
+          </p>
+          {sampleQuestions.map((sample, index) => (
+            <p className="quiz-preview-explanation" key={sample.prompt}>
+              <strong>
+                {answers[index] === sample.correctIndex ? "✓" : "Review"} Question {index + 1}:
+              </strong>{" "}
+              {sample.explanation}
+            </p>
+          ))}
+          <Button onClick={onCreateAccount}>Create an account to take a reviewed quiz</Button>
+        </div>
       )}
       <div className="quiz-preview-actions">
         {submitted ? (
@@ -566,7 +582,7 @@ function GuestExplorePage({
           <h1>Find your next practice.</h1>
           <p>Browse course coverage and reviewed quizzes before you join.</p>
         </div>
-        <QuizPreview />
+        <QuizPreview onCreateAccount={() => onNavigate("signup")} />
         <label className="search-field guest-explore-search">
           <span aria-hidden="true">⌕</span>
           <input
@@ -1161,10 +1177,16 @@ function CourseCard({
         <strong>{course.code}</strong>
         <small>{course.title}</small>
         <span className="course-readiness-row">
+          {hasReviewedQuiz ? (
+            <span className="badge badge-green">Reviewed quiz ready</span>
+          ) : (
+            <strong className="course-readiness-state">
+              {paperCount ? "Past papers only" : "No study materials yet"}
+            </strong>
+          )}
           <em>
-            {paperCount} {paperCount === 1 ? "paper" : "papers"} available
+            {paperCount} approved {paperCount === 1 ? "paper" : "papers"}
           </em>
-          {hasReviewedQuiz && <span className="badge badge-green">Quiz ready</span>}
         </span>
       </span>
       <span aria-hidden="true">›</span>
@@ -1194,9 +1216,21 @@ function studyRelevance(
   return 3;
 }
 
-function sortCoursesForProfile(courses: Course[], profile: Profile | null) {
+function sortCoursesForProfile(
+  courses: Course[],
+  profile: Profile | null,
+  papers: Paper[],
+  quizzes: QuizSet[],
+) {
+  const quizPaperIds = new Set(
+    quizzes.map((quiz) => quiz.paper_id).filter((paperId): paperId is string => paperId !== null),
+  );
+  const quizReadyCourseIds = new Set(
+    papers.filter((paper) => quizPaperIds.has(paper.id)).map((paper) => paper.course_id),
+  );
   return [...courses].sort(
     (first, second) =>
+      Number(quizReadyCourseIds.has(second.id)) - Number(quizReadyCourseIds.has(first.id)) ||
       studyRelevance(first.department, first.university, profile) -
         studyRelevance(second.department, second.university, profile) ||
       first.university.localeCompare(second.university) ||
@@ -1547,24 +1581,39 @@ function DailyGoalCard({
     : 100;
 
   return (
-    <section className={`daily-goal-card ${didPractice ? "completed" : ""}`}>
+    <section
+      className={`daily-goal-card ${didPractice ? "completed" : ""} ${progress?.current_daily_streak ? "streak-active" : ""}`}
+    >
       <div className="daily-goal-main">
         <span className="daily-goal-icon" aria-hidden="true">
           {didPractice ? "✓" : progress?.current_daily_streak ? "🔥" : "✦"}
+          {progress?.current_daily_streak ? (
+            <strong>{progress.current_daily_streak}</strong>
+          ) : !didPractice && progress ? (
+            <small>DAY 1</small>
+          ) : null}
         </span>
         <div>
           <span className="eyebrow">{didPractice ? "Daily goal complete" : "Your daily goal"}</span>
           <h2>
             {didPractice
               ? "You showed up for yourself today."
-              : "One practice session. Keep your streak alive."}
+              : progress?.current_daily_streak
+                ? "Keep your study streak alive today."
+                : progress?.best_daily_streak
+                  ? "Restart your streak with one quiz today."
+                  : "Start your first study streak today."}
           </h2>
           <p>
             {progress && progress.current_daily_streak > 0
               ? didPractice
-                ? `You’re on a ${progress.current_daily_streak}-day streak. You kept it alive today.`
-                : `You’re on a ${progress.current_daily_streak}-day streak. Practice today to keep it alive.`
-              : "Complete one quiz or battle today to build a steady study habit."}
+                ? `Your ${progress.current_daily_streak}-day streak is safe. Come back tomorrow to keep it growing.`
+                : `One reviewed quiz today protects your ${progress.current_daily_streak}-day streak.`
+              : didPractice
+                ? "You’ve started your streak. Come back tomorrow to make it two days."
+                : progress?.best_daily_streak
+                  ? "Start a new streak today: one reviewed quiz logs day one and shows your score with answer review."
+                  : "Your first streak starts today: finish a reviewed quiz to see your score, review answers and log day one."}
           </p>
           {isEvening && isProtectingStreak && !didPractice && (
             <p className="daily-streak-warning" role="status">
@@ -2232,8 +2281,8 @@ function App() {
   const selectedCourse = courses.find((course) => course.id === selectedCourseId) ?? null;
   const selectedPaper = papers.find((paper) => paper.id === selectedPaperId) ?? null;
   const prioritizedCourses = useMemo(
-    () => sortCoursesForProfile(courses, profile),
-    [courses, profile],
+    () => sortCoursesForProfile(courses, profile, papers, publishedQuizSets),
+    [courses, papers, profile, publishedQuizSets],
   );
   const prioritizedQuizSets = useMemo(
     () => sortQuizSetsForProfile(publishedQuizSets, profile),
@@ -3067,7 +3116,13 @@ function App() {
       setLastAttemptReviewError(null);
       navigate("results");
       try {
-        setLastAttemptReview(await getQuizAttemptReview(attempt.id));
+        const review = await getQuizAttemptReview(attempt.id);
+        setLastAttemptReview(review);
+        if (review.length) {
+          void recordReviewedQuizActivation(attempt.id).catch((activationError: unknown) => {
+            console.error("Could not record first reviewed-quiz activation.", activationError);
+          });
+        }
       } catch (reviewError) {
         setLastAttemptReviewError(
           reviewError instanceof Error
@@ -3390,6 +3445,11 @@ function App() {
                 Real past questions and focused practice, powered by your university’s academic
                 community.
               </p>
+              <ul className="welcome-trust-list" aria-label="How Rimbly supports your study">
+                <li>Human-reviewed questions</li>
+                <li>University-focused courses</li>
+                <li>Scores with answer review</li>
+              </ul>
             </div>
           </section>
           <section className="auth-panel">
@@ -3399,10 +3459,10 @@ function App() {
               starts here.
             </h2>
             <p>
-              Try a sample question now, then create an account to find published papers and save
-              your progress.
+              Try two exam-style questions and review your answers, then create an account to save
+              progress and practise reviewed quizzes.
             </p>
-            <QuizPreview />
+            <QuizPreview onCreateAccount={() => navigate("signup")} />
             {configurationBanner && (
               <p className="app-feedback" role="alert">
                 {configurationBanner}
@@ -3414,12 +3474,17 @@ function App() {
                 {notice}
               </p>
             )}
-            <Button disabled={!supabase} onClick={() => navigate("signup")}>
-              Create free account →
-            </Button>
             <Button variant="secondary" disabled={!supabase} onClick={() => navigate("login")}>
               I already have an account
             </Button>
+            <button
+              className="guest-explore-link"
+              type="button"
+              disabled={!supabase}
+              onClick={() => navigate("signup")}
+            >
+              Create a free account →
+            </button>
             <button
               className="guest-explore-link"
               type="button"
@@ -3427,7 +3492,7 @@ function App() {
             >
               Explore courses without an account →
             </button>
-            <small>Browse reviewed course coverage before you join.</small>
+            <small>Reviewed quizzes · University-focused courses · Score and answer review</small>
           </section>
         </div>
       );
@@ -3703,7 +3768,9 @@ function App() {
                 <strong>Progress and quiz history</strong>
               </span>
               <span className="home-progress-summary">
-                {attempts.length} {attempts.length === 1 ? "quiz" : "quizzes"}
+                {attempts.length
+                  ? `${attempts.length} ${attempts.length === 1 ? "quiz" : "quizzes"}`
+                  : "Your first score is one quiz away"}
               </span>
             </summary>
             <section>
@@ -3714,42 +3781,36 @@ function App() {
                 </div>
                 <button onClick={() => navigate("quiz-history")}>Quiz history ›</button>
               </div>
-              <div className="stats-grid">
-                <Stat icon="✓" value={String(attempts.length)} label="Saved quizzes" />
-                <Stat
-                  icon="◎"
-                  value={
-                    attempts.length
-                      ? `${Math.round(attempts.reduce((sum, item) => sum + item.score_percent, 0) / attempts.length)}%`
-                      : "—"
-                  }
-                  label="Average score"
-                />
-                <Stat
-                  icon="⚔"
-                  value={
-                    gameProgressLoading
-                      ? "…"
-                      : gameProgress
-                        ? `${gameProgress.current_win_streak} · best ${gameProgress.best_win_streak}`
-                        : "—"
-                  }
-                  label="Battle win streak"
-                  tone="hot"
-                />
-                <Stat
-                  icon="🔥"
-                  value={
-                    gameProgressLoading
-                      ? "…"
-                      : gameProgress
-                        ? `${gameProgress.current_daily_streak} days`
-                        : "—"
-                  }
-                  label="Daily streak"
-                  tone="hot"
-                />
-              </div>
+              {attempts.length || gameProgress?.battle_wins ? (
+                <div className="stats-grid">
+                  {attempts.length > 0 && (
+                    <>
+                      <Stat icon="✓" value={String(attempts.length)} label="Saved quizzes" />
+                      <Stat
+                        icon="◎"
+                        value={`${Math.round(attempts.reduce((sum, item) => sum + item.score_percent, 0) / attempts.length)}%`}
+                        label="Average score"
+                      />
+                    </>
+                  )}
+                  {gameProgress?.battle_wins ? (
+                    <>
+                      <Stat
+                        icon="⚔"
+                        value={`${gameProgress.current_win_streak} · best ${gameProgress.best_win_streak}`}
+                        label="Battle win streak"
+                        tone="hot"
+                      />
+                      <Stat
+                        icon="🔥"
+                        value={`${gameProgress.current_daily_streak} days`}
+                        label="Daily streak"
+                        tone="hot"
+                      />
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
               {gameProgressError && (
                 <p className="field-note" role="alert">
                   Daily streak unavailable: {gameProgressError}
@@ -3775,10 +3836,12 @@ function App() {
                 </div>
               ) : (
                 <EmptyState
-                  title="No quiz results yet"
-                  text="Complete a quiz from an approved paper to see your progress here."
-                  action="Find a paper"
-                  onAction={() => navigate("practice")}
+                  title="Your first score is one quiz away"
+                  text="Finish a reviewed quiz to see your score, review answers and start building your progress."
+                  action="Start a reviewed quiz"
+                  onAction={() =>
+                    dailyChallenge ? void startQuiz(dailyChallenge.id) : navigate("quiz-setup")
+                  }
                 />
               )}
             </section>
@@ -3829,7 +3892,7 @@ function App() {
                   : navigate("quiz-setup")
               }
             >
-              {matchingCourseQuizzes.length ? "Start Quiz" : "Choose a paper to practise"}
+              {matchingCourseQuizzes.length ? "Start a reviewed quiz" : "Find a reviewed quiz"}
             </Button>
             <Button
               variant="secondary"
@@ -3990,10 +4053,10 @@ function App() {
             </div>
           ) : (
             <EmptyState
-              title="No quiz attempts yet"
-              text="Your saved attempts will show here after your first quiz."
-              action="Find a paper"
-              onAction={() => navigate("practice")}
+              title="Your first reviewed quiz starts your history"
+              text="Complete a quiz to save your score and answer review here."
+              action="Browse reviewed quizzes"
+              onAction={() => navigate("quiz-setup")}
             />
           )}
         </>
@@ -4222,8 +4285,8 @@ function App() {
               </div>
             ) : (
               <EmptyState
-                title="No saved courses"
-                text="Save a course from its page to keep it here."
+                title="Build your personal course list"
+                text="Save a course to keep its papers and quiz-ready status close at hand."
                 action="Browse courses"
                 onAction={() => navigate("practice")}
               />
@@ -4499,6 +4562,99 @@ function App() {
   );
 }
 
+function AdminActivationMetricsPanel() {
+  const [metrics, setMetrics] = useState<AdminActivationMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadMetrics = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setMetrics(await getAdminActivationMetrics());
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, "Could not load activation metrics."));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMetrics();
+  }, [loadMetrics]);
+
+  const medianSeconds = metrics?.median_seconds_to_activation ?? null;
+
+  return (
+    <section className="activation-metrics-panel" aria-labelledby="activation-metrics-title">
+      <header className="admin-section-heading">
+        <div>
+          <span className="eyebrow">Activation measurement</span>
+          <h2 id="activation-metrics-title">First reviewed quiz</h2>
+        </div>
+        <Button variant="secondary" disabled={loading} onClick={() => void loadMetrics()}>
+          {loading ? "Refreshing…" : "Refresh"}
+        </Button>
+      </header>
+      {error ? (
+        <div className="activation-metrics-error" role="alert">
+          <p>{error}</p>
+          <small>
+            Apply <code>activation-measurement.sql</code> after the quiz migrations to enable this
+            report.
+          </small>
+        </div>
+      ) : loading ? (
+        <p className="field-note" role="status">
+          Loading first-quiz activation…
+        </p>
+      ) : metrics ? (
+        <>
+          <div className="activation-metrics-grid">
+            <article>
+              <small>Eligible signups (90s+)</small>
+              <strong>{metrics.total_signups.toLocaleString()}</strong>
+            </article>
+            <article>
+              <small>Completed a reviewed quiz</small>
+              <strong>
+                {metrics.activated_students.toLocaleString()} ·{" "}
+                {metrics.activation_rate_percent.toFixed(1)}%
+              </strong>
+            </article>
+            <article>
+              <small>Median signup to answer review</small>
+              <strong>
+                {medianSeconds === null
+                  ? "—"
+                  : medianSeconds < 60
+                    ? `${Math.round(medianSeconds)} sec`
+                    : `${(medianSeconds / 60).toFixed(1)} min`}
+              </strong>
+            </article>
+            <article>
+              <small>Activated within 90 seconds</small>
+              <strong>
+                {metrics.under_90_seconds_percent === null
+                  ? "—"
+                  : `${metrics.under_90_seconds_percent.toFixed(1)}%`}
+              </strong>
+            </article>
+          </div>
+          <p className="activation-metrics-note">
+            Activation means completing a reviewed quiz and successfully loading its answer review.
+            The rate includes accounts created after tracking began with at least 90 seconds to
+            activate. A private account ID deduplicates events; reports are aggregate and contain no
+            answer content.
+          </p>
+        </>
+      ) : (
+        <p className="field-note">No activation report is available.</p>
+      )}
+    </section>
+  );
+}
+
 function AdminWorkspace({
   access,
   accessError,
@@ -4564,6 +4720,7 @@ function AdminWorkspace({
   const canReview = Boolean(access?.permissions.includes("contributions.review"));
   const canViewAudit = Boolean(access?.permissions.includes("audit.view"));
   const canViewDashboard = Boolean(access?.permissions.includes("dashboard.access"));
+  const canViewAnalytics = Boolean(access?.permissions.includes("analytics.view"));
   const canManagePapers = Boolean(access?.permissions.includes("papers.manage"));
   const canManageQuizzes = Boolean(
     access?.permissions.includes("quiz.manage") || access?.permissions.includes("quiz.review"),
@@ -5045,31 +5202,34 @@ function AdminWorkspace({
         ) : (
           <>
             {section === "overview" && overview && (
-              <section className="admin-metrics" aria-label="Platform metrics">
-                {[
-                  ["Students", overview.students],
-                  ["Courses", overview.courses],
-                  ["Published papers", overview.published_papers],
-                  ["Pending reviews", overview.pending_contributions],
-                  ["Quiz attempts", overview.quiz_attempts],
-                  ["Active admins", overview.active_admins],
-                ].map(([label, value]) => (
-                  <article className="admin-metric" key={label}>
-                    <small>{label}</small>
-                    <strong>{Number(value).toLocaleString()}</strong>
-                  </article>
-                ))}
-                {canReview && (
-                  <button className="btn btn-primary" onClick={() => setSection("contributions")}>
-                    Review pending contributions
-                  </button>
-                )}
-                {canManagePapers && (
-                  <button className="btn btn-secondary" onClick={() => setSection("papers")}>
-                    Upload a past paper
-                  </button>
-                )}
-              </section>
+              <>
+                <section className="admin-metrics" aria-label="Platform metrics">
+                  {[
+                    ["Students", overview.students],
+                    ["Courses", overview.courses],
+                    ["Published papers", overview.published_papers],
+                    ["Pending reviews", overview.pending_contributions],
+                    ["Quiz attempts", overview.quiz_attempts],
+                    ["Active admins", overview.active_admins],
+                  ].map(([label, value]) => (
+                    <article className="admin-metric" key={label}>
+                      <small>{label}</small>
+                      <strong>{Number(value).toLocaleString()}</strong>
+                    </article>
+                  ))}
+                  {canReview && (
+                    <button className="btn btn-primary" onClick={() => setSection("contributions")}>
+                      Review pending contributions
+                    </button>
+                  )}
+                  {canManagePapers && (
+                    <button className="btn btn-secondary" onClick={() => setSection("papers")}>
+                      Upload a past paper
+                    </button>
+                  )}
+                </section>
+                {canViewAnalytics && <AdminActivationMetricsPanel />}
+              </>
             )}
             {section === "contributions" && (
               <section className="admin-review-list">

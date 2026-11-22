@@ -296,6 +296,14 @@ export interface AdminOverview {
   active_admins: number;
 }
 
+export interface AdminActivationMetrics {
+  total_signups: number;
+  activated_students: number;
+  activation_rate_percent: number;
+  median_seconds_to_activation: number | null;
+  under_90_seconds_percent: number | null;
+}
+
 export interface AdminContribution {
   id: string;
   user_id: string;
@@ -1286,6 +1294,19 @@ export async function getAdminOverview() {
   const { data, error } = await requireSupabase().rpc("admin_get_overview");
   if (error) throw error;
   return data as AdminOverview;
+}
+
+export async function getAdminActivationMetrics() {
+  const { data, error } = await requireSupabase().rpc("admin_get_activation_metrics");
+  if (error) throw error;
+  return (data?.[0] ?? null) as AdminActivationMetrics | null;
+}
+
+export async function recordReviewedQuizActivation(attemptId: string) {
+  const { error } = await requireSupabase().rpc("record_reviewed_quiz_activation", {
+    p_attempt_id: attemptId,
+  });
+  if (error) throw error;
 }
 
 export async function getAdminContributions() {

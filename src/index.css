@@ -862,22 +862,39 @@ h3 {
   gap: 14px;
 }
 .daily-goal-icon {
-  width: 44px;
-  height: 44px;
+  width: 64px;
+  height: 64px;
   display: grid;
   flex: none;
   place-items: center;
-  border: 1px solid #d7c7f1;
-  border-radius: 14px;
-  background: #fff;
-  color: var(--purple);
-  font-size: 20px;
-  font-weight: 800;
+  align-content: center;
+  gap: 1px;
+  border: 1px solid #f0d7a4;
+  border-radius: 18px;
+  background: #fff8e9;
+  color: #a45b0a;
+  font-size: 25px;
+  line-height: 1;
+}
+.daily-goal-icon strong {
+  font: 900 17px "Outfit";
+}
+.daily-goal-icon small {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
 }
 .daily-goal-card.completed .daily-goal-icon {
   border-color: #b6e2c0;
+  background: #fff;
   color: var(--green);
   animation: streak-arrive 0.55s ease-out;
+}
+.daily-goal-card.streak-active {
+  border-color: #eccd91;
+  background:
+    radial-gradient(circle at 100% 0, rgb(255 226 173 / 72%), transparent 36%),
+    linear-gradient(135deg, #fff 0%, #fffaf0 100%);
 }
 .daily-goal-bonus {
   color: #176b35;
@@ -1146,7 +1163,7 @@ h3 {
 .home-preview-ghost strong {
   overflow: hidden;
   color: #67577a;
-  font: 800 12px "Outfit";
+  font: 800 11px "Outfit";
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1168,6 +1185,17 @@ h3 {
   color: var(--purple-dark);
   font-size: 12px;
   font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.guide-skip {
+  min-height: 40px;
+  margin-left: auto;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -1204,13 +1232,22 @@ h3 {
   gap: 6px;
   margin-top: 5px;
 }
+.course-readiness-state,
 .course-copy > .course-readiness-row > em {
-  color: #797979;
+  color: #687184;
   font-size: 9px;
   font-style: normal;
+  font-weight: 650;
+}
+.course-readiness-state {
+  color: #76521b;
+}
+.course-copy > .course-readiness-row > em {
+  font-weight: 500;
 }
 .course-readiness-row .badge {
-  font-size: 8px;
+  padding: 5px 8px;
+  font-size: 9px;
 }
 .game-progress-panel {
   display: grid;
@@ -3714,8 +3751,13 @@ select {
   justify-content: space-between;
   padding: 24px 20px 34px;
   border-bottom: 2px solid var(--ink);
-  background: var(--purple);
+  background:
+    radial-gradient(ellipse at 75% 30%, rgb(148 112 218 / 55%), transparent 35%),
+    linear-gradient(145deg, #5233a4, #6840c5 64%, #5a37af);
   color: #fff;
+}
+.auth-art > div:last-child {
+  z-index: 1;
 }
 .auth-art .logo-mark {
   background: var(--amber);
@@ -3740,6 +3782,23 @@ select {
   color: #e1d7f4;
   font-size: 12px;
   line-height: 1.6;
+}
+.welcome-trust-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.welcome-trust-list li {
+  padding: 7px 9px;
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 99px;
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
 }
 .welcome-emblem {
   position: absolute;
@@ -3876,6 +3935,26 @@ select {
   color: var(--purple-dark);
   font-size: 10px;
   line-height: 1.4;
+}
+.quiz-preview-review {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d9c9f1;
+  border-radius: 10px;
+  background: #faf7ff;
+}
+.quiz-preview-explanation {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.quiz-preview-explanation strong {
+  color: var(--ink);
+}
+.quiz-preview-review > .btn {
+  width: 100%;
 }
 .quiz-preview-actions {
   display: flex;
@@ -5254,6 +5333,59 @@ select {
   grid-column: 1 / -1;
 }
 
+.activation-metrics-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+}
+.activation-metrics-panel .admin-section-heading {
+  margin: 0;
+}
+.activation-metrics-panel .admin-section-heading h2 {
+  font-size: 20px;
+}
+.activation-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.activation-metrics-grid article {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--bg);
+}
+.activation-metrics-grid small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.activation-metrics-grid strong {
+  font: 800 20px "Outfit";
+  overflow-wrap: anywhere;
+}
+.activation-metrics-note,
+.activation-metrics-error p,
+.activation-metrics-error small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.activation-metrics-error {
+  display: grid;
+  gap: 6px;
+}
+.activation-metrics-error code {
+  font-size: 10px;
+}
+
 .admin-review-list {
   display: grid;
   gap: 14px;
@@ -5617,6 +5749,10 @@ select {
 
   .admin-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .activation-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-invite-actions,

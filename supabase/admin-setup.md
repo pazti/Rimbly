@@ -24,7 +24,13 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    points per correct answer; battles add 25 points for a win or 8 for a draw.
    The migration adds UTC daily streaks, earned badges, and weekly/all-time
    leaderboards. Weekly rankings reset every Monday at 00:00 UTC. The title ladder
-   uses best battle streak thresholds of 1, 3, 5, and 10 wins.
+   uses best battle streak thresholds of 1, 3, 5, and 10 wins. Apply
+   `activation-measurement.sql` after `quiz-battles.sql` and the admin foundation
+   and management migrations to measure signup-to-first-reviewed-quiz activation.
+   Activation is recorded after the score is saved and its answer review loads. It
+   tracks only accounts created after the migration, stores an internal account ID
+   and timing but no names or answers, and exposes aggregate metrics to administrators
+   with `analytics.view`.
 7. Apply `monetization.sql` after `gamification.sql`. It adds server-managed
    Rimbly Pro subscriptions and payment records, a Pro flair on leaderboards,
    five free quiz submissions and three free battle invites per UTC day, and
