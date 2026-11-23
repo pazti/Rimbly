@@ -6292,6 +6292,7 @@ function AdminWorkspace({
     (totals, ambassador) => {
       totals.signups += ambassador.total_signups;
       totals.activated += ambassador.total_activated;
+      totals.pending += Math.max(0, ambassador.total_signups - ambassador.total_activated);
       totals.earned += ambassador.total_earned;
       totals.paid += ambassador.total_paid;
       totals.balance += ambassador.available_balance;
@@ -6308,6 +6309,7 @@ function AdminWorkspace({
     {
       signups: 0,
       activated: 0,
+      pending: 0,
       earned: 0,
       paid: 0,
       balance: 0,
@@ -7459,6 +7461,13 @@ function AdminWorkspace({
                       <strong>{ambassadorPayoutMetrics.activated.toLocaleString()}</strong>
                     </article>
                     <article>
+                      <small>Pending referrals · potential only</small>
+                      <strong>
+                        {ambassadorPayoutMetrics.pending.toLocaleString()} · up to ₦
+                        {(ambassadorPayoutMetrics.pending * 250).toLocaleString("en-NG")}
+                      </strong>
+                    </article>
+                    <article>
                       <small>Confirmed earned</small>
                       <strong>₦{ambassadorPayoutMetrics.earned.toLocaleString("en-NG")}</strong>
                     </article>
@@ -7522,6 +7531,14 @@ function AdminWorkspace({
                           {" · "}₦{ambassador.total_earned.toLocaleString("en-NG")} earned
                           {" · "}₦{ambassador.total_paid.toLocaleString("en-NG")} paid
                           {" · "}₦{ambassador.available_balance.toLocaleString("en-NG")} outstanding
+                        </small>
+                        <small>
+                          {Math.max(0, ambassador.total_signups - ambassador.total_activated)}{" "}
+                          pending · up to ₦
+                          {(
+                            Math.max(0, ambassador.total_signups - ambassador.total_activated) * 250
+                          ).toLocaleString("en-NG")}{" "}
+                          potential only, not earned
                         </small>
                       </div>
                       <span

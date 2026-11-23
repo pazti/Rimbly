@@ -568,6 +568,13 @@ create trigger record_ambassador_activation_reward
 after update of status on public.ambassador_referrals
 for each row execute function public.record_ambassador_activation_reward();
 
+update public.ambassador_referrals referral
+set status = 'earned',
+    activated_at = activation.activated_at
+from public.rimbly_activation_events activation
+where activation.user_id = referral.referred_user_id
+  and referral.status = 'pending';
+
 create or replace function public.get_ambassador_dashboard()
 returns table (
   invite_code text,

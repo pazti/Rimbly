@@ -77,7 +77,8 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
     bank details, and only Super Admins can view full account details or payout metrics.
     Transfers are manual, with a ₦5,000 minimum per ambassador and payouts recorded on
     Sundays in Africa/Lagos time after the transfer is complete. This migration does
-    not initiate bank transfers.
+    not initiate bank transfers. It also reconciles referrals with activation events
+    already recorded before the ambassador reward trigger was installed.
 11. Deploy the two Supabase Edge Functions from the repository root:
 
    ```sh
