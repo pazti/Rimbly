@@ -767,28 +767,28 @@ begin
       from public.ambassador_payouts payout
       group by payout.ambassador_user_id
     )
-    select ambassador.user_id,
-      coalesce(profile.full_name, 'Student'),
-      coalesce(account.email, ''),
-      ambassador.invite_code,
-      ambassador.status,
-      ambassador.agreed_at,
+    select ambassador.user_id::uuid,
+      coalesce(profile.full_name, 'Student')::text,
+      coalesce(account.email, '')::text,
+      ambassador.invite_code::text,
+      ambassador.status::text,
+      ambassador.agreed_at::timestamptz,
       coalesce(referral.total_signups, 0)::bigint,
       coalesce(referral.total_activated, 0)::bigint,
       coalesce(referral.total_earned, 0)::bigint,
-      payout_account.account_name,
-      payout_account.bank_name,
-      payout_account.account_number,
-      payout_account.updated_at,
+      payout_account.account_name::text,
+      payout_account.bank_name::text,
+      payout_account.account_number::text,
+      payout_account.updated_at::timestamptz,
       coalesce(payout.total_paid, 0)::bigint,
-      payout.last_paid_at,
+      payout.last_paid_at::timestamptz,
       (
         select latest_payout.transfer_reference
         from public.ambassador_payouts latest_payout
         where latest_payout.ambassador_user_id = ambassador.user_id
         order by latest_payout.paid_at desc
         limit 1
-      ),
+      )::text,
       greatest(
         coalesce(referral.total_earned, 0) - coalesce(payout.total_paid, 0), 0
       )::bigint,
