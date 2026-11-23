@@ -204,8 +204,47 @@ export interface PlayerBadge {
     | "daily_3"
     | "daily_7"
     | "daily_14"
-    | "daily_30";
+    | "daily_30"
+    | "first_steps"
+    | "comeback"
+    | "helpful_contributor"
+    | "campus_connector";
   earned_at: string;
+}
+
+export interface LearningMissionProgress {
+  completed: boolean;
+  progress: number;
+  target: number;
+  xp_reward: number;
+  xp_earned: number;
+  completed_at: string | null;
+}
+
+export interface LearningMissions {
+  daily_quiz: LearningMissionProgress;
+  weekly_study_days: LearningMissionProgress;
+  weekly_battle: LearningMissionProgress;
+}
+
+export interface StreakRecoveryStatus {
+  tokens: number;
+  eligible: boolean;
+  can_recover: boolean;
+  eligible_streak_days: number;
+}
+
+export type ProfileCollectibleId =
+  | "fresh_frame"
+  | "community_frame"
+  | "focus_theme"
+  | "comeback_theme";
+
+export interface ProfileCollectible {
+  collectible_id: ProfileCollectibleId;
+  category: "frame" | "theme";
+  earned_at: string;
+  equipped: boolean;
 }
 
 export interface GameProgress {
@@ -220,6 +259,9 @@ export interface GameProgress {
   best_daily_streak: number;
   title: string;
   badges: PlayerBadge[];
+  missions: LearningMissions;
+  streak_recovery: StreakRecoveryStatus;
+  collectibles: ProfileCollectible[];
 }
 
 export interface BattleOpponent {
@@ -666,9 +708,48 @@ export async function getDailyChallengeLeaderboard(quizId: string) {
 }
 
 export async function getGameProgress() {
-  const { data, error } = await requireSupabase().rpc("get_my_game_progress");
+  const client = requireSupabase();
+  const [{ data, error }, { data: missions, error: missionsError }] = await Promise.all([
+    client.rpc("get_my_game_progress"),
+    client.rpc("get_my_learning_missions"),
+  ]);
   if (error) throw error;
-  return data as GameProgress;
+  if (missionsError) {
+    if (missionsError.code === "PGRST202" || missionsError.code === "42883") {
+      throw new Error(
+        "Learning rewards are not installed yet. Apply supabase/learning-rewards.sql through the project's authorized migration workflow.",
+      );
+    }
+    throw missionsError;
+  }
+  const rewards = missions as LearningMissions & {
+    streak_recovery: StreakRecoveryStatus;
+    collectibles: ProfileCollectible[];
+  };
+  return {
+    ...(data as Omit<GameProgress, "missions" | "streak_recovery" | "collectibles">),
+    missions: rewards,
+    streak_recovery: rewards.streak_recovery,
+    collectibles: rewards.collectibles,
+  };
+}
+
+export async function useStreakRecoveryToken() {
+  const { data, error } = await requireSupabase().rpc("use_streak_recovery_token");
+  if (error) throw error;
+  return data as { current_daily_streak: number; tokens_remaining: number };
+}
+
+export async function equipProfileCollectible(collectibleId: ProfileCollectibleId | null) {
+  const { data, error } = await requireSupabase().rpc("set_profile_collectible", {
+    p_collectible_id: collectibleId,
+  });
+  if (error) throw error;
+  return data as {
+    collectible_id: ProfileCollectibleId | null;
+    category?: "frame" | "theme";
+    equipped: boolean;
+  };
 }
 
 export async function getMyRimblyBillingStatus() {

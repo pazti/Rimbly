@@ -22,6 +22,7 @@ import {
   Contribution,
   Battle,
   Course,
+  equipProfileCollectible,
   GameProgress,
   DailyChallengeLeader,
   GuestExploreCatalog,
@@ -35,6 +36,7 @@ import {
   QuizAttempt,
   QuizSet,
   University,
+  ProfileCollectibleId,
   createAdminQuizRevision,
   createContribution,
   createSuggestion,
@@ -106,6 +108,7 @@ import {
   toggleSavedCourse,
   getMyRimblyBillingStatus,
   getQuizAttemptReview,
+  useStreakRecoveryToken,
 } from "./lib/data";
 import { supabase, supabaseConfigurationError } from "./lib/supabase";
 import { rimblyProPlans, RimblyPlanId } from "./lib/monetization";
@@ -754,6 +757,7 @@ function AppShell({
   title,
   adminAvailable,
   ambassadorAvailable,
+  animationsDisabled,
   onNavigate,
   children,
 }: {
@@ -761,11 +765,12 @@ function AppShell({
   title: string;
   adminAvailable: boolean;
   ambassadorAvailable: boolean;
+  animationsDisabled: boolean;
   onNavigate: (route: Route) => void;
   children: ReactNode;
 }) {
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${animationsDisabled ? "motion-disabled" : ""}`}>
       <aside className="desktop-sidebar">
         <Logo onClick={() => onNavigate("home")} />
         <nav aria-label="Main navigation">
@@ -843,17 +848,21 @@ function AuthPage({
   mode,
   busy,
   error,
+  referralCode,
   onSubmit,
   onNavigate,
   onClearError,
+  onReferralCodeChange,
   configured,
 }: {
   mode: "signup" | "login";
   busy: boolean;
   error: string | null;
+  referralCode: string | null;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onNavigate: (route: Route) => void;
   onClearError: () => void;
+  onReferralCodeChange: (value: string) => void;
   configured: boolean;
 }) {
   const login = mode === "login";
@@ -899,6 +908,25 @@ function AuthPage({
               autoComplete={login ? "current-password" : "new-password"}
             />
           </label>
+          {!login && (
+            <label>
+              <span>Referral code (optional)</span>
+              <input
+                name="referralCode"
+                type="text"
+                value={referralCode ?? ""}
+                maxLength={10}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                onChange={(event) => onReferralCodeChange(event.currentTarget.value)}
+                aria-describedby="referral-code-help"
+              />
+              <small id="referral-code-help" className="field-note">
+                If you opened an invite link, its code is filled in automatically.
+              </small>
+            </label>
+          )}
           {login && (
             <button className="forgot" type="button" onClick={() => onNavigate("forgot-password")}>
               Forgot password?
@@ -1745,6 +1773,451 @@ function DailyGoalCard({
   );
 }
 
+function LearningProgressCard({
+  attempts,
+  papers,
+  courses,
+  progress,
+  progressLoading,
+  progressError,
+  animationsDisabled,
+  onToggleAnimations,
+  recoveryBusy,
+  onRecoverStreak,
+  onQuiz,
+  onBattle,
+  onLeaderboard,
+}: {
+  attempts: QuizAttempt[];
+  papers: Paper[];
+  courses: Course[];
+  progress: GameProgress | null;
+  progressLoading: boolean;
+  progressError: string | null;
+  animationsDisabled: boolean;
+  onToggleAnimations: () => void;
+  recoveryBusy: boolean;
+  onRecoverStreak: () => void;
+  onQuiz: () => void;
+  onBattle: () => void;
+  onLeaderboard: () => void;
+}) {
+  const now = new Date();
+  const todayKey = now.toDateString();
+  const startOfWeek = new Date(now);
+  startOfWeek.setHours(0, 0, 0, 0);
+  startOfWeek.setDate(startOfWeek.getDate() - ((startOfWeek.getDay() + 6) % 7));
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(endOfWeek.getDate() + 7);
+  const todaysAttempts = attempts.filter(
+    (attempt) => new Date(attempt.created_at).toDateString() === todayKey,
+  );
+  const weeksAttempts = attempts.filter((attempt) => {
+    const date = new Date(attempt.created_at);
+    return date >= startOfWeek && date < endOfWeek;
+  });
+  const studyDays = new Set(
+    weeksAttempts.map((attempt) => new Date(attempt.created_at).toDateString()),
+  );
+  const dailyMission = progress?.missions.daily_quiz;
+  const weeklyStudyMission = progress?.missions.weekly_study_days;
+  const weeklyBattleMission = progress?.missions.weekly_battle;
+  const streakRecovery = progress?.streak_recovery;
+  const dailyGoalComplete = dailyMission?.completed ?? todaysAttempts.length > 0;
+  const weeklyStudyDays = weeklyStudyMission?.progress ?? studyDays.size;
+  const attemptsWithPrevious = attempts.map((attempt, index) => {
+    const previousAttempt = attempts
+      .slice(index + 1)
+      .find(
+        (candidate) =>
+          (attempt.quiz_id && candidate.quiz_id === attempt.quiz_id) ||
+          (attempt.paper_id && candidate.paper_id === attempt.paper_id),
+      );
+    return { attempt, previousAttempt };
+  });
+  const latestPreviousAttempt = attemptsWithPrevious[0]?.previousAttempt;
+  const scoreChange =
+    attempts[0] && latestPreviousAttempt
+      ? attempts[0].score_percent - latestPreviousAttempt.score_percent
+      : null;
+  const improvements = attemptsWithPrevious.filter(
+    ({ attempt, previousAttempt }) =>
+      previousAttempt && attempt.score_percent > previousAttempt.score_percent,
+  ).length;
+  const courseById = new Map(courses.map((course) => [course.id, course]));
+  const paperCourseById = new Map(papers.map((paper) => [paper.id, paper.course_id]));
+  const courseScores = new Map<string, { total: number; count: number }>();
+  for (const attempt of attempts) {
+    const courseId = attempt.paper_id ? paperCourseById.get(attempt.paper_id) : undefined;
+    if (!courseId) continue;
+    const score = courseScores.get(courseId) ?? { total: 0, count: 0 };
+    score.total += attempt.score_percent;
+    score.count += 1;
+    courseScores.set(courseId, score);
+  }
+  const rankedCourses = [...courseScores.entries()]
+    .map(([courseId, score]) => ({
+      course: courseById.get(courseId),
+      average: Math.round(score.total / score.count),
+      count: score.count,
+    }))
+    .filter((item): item is { course: Course; average: number; count: number } =>
+      Boolean(item.course),
+    )
+    .sort((first, second) => second.average - first.average);
+  const strongestCourse = rankedCourses[0];
+  const weakestCourse = rankedCourses.length > 1 ? rankedCourses.at(-1) : undefined;
+  const quizzesCompleted = progress?.quizzes_completed ?? attempts.length;
+  const points = progress?.points ?? 0;
+  const bestStreak = progress?.best_daily_streak ?? 0;
+  const rankSteps = [
+    { name: "Rookie", points: 0, quizzes: 0, streak: 0, improvements: 0 },
+    { name: "Learner", points: 100, quizzes: 3, streak: 2, improvements: 0 },
+    { name: "Scholar", points: 300, quizzes: 6, streak: 3, improvements: 1 },
+    { name: "Advanced Scholar", points: 700, quizzes: 12, streak: 7, improvements: 1 },
+    { name: "Academic Champion", points: 1400, quizzes: 20, streak: 14, improvements: 3 },
+    { name: "Elite Scholar", points: 2500, quizzes: 35, streak: 30, improvements: 5 },
+  ];
+  const qualifies = (step: (typeof rankSteps)[number]) =>
+    points >= step.points &&
+    quizzesCompleted >= step.quizzes &&
+    bestStreak >= step.streak &&
+    improvements >= step.improvements;
+  let rankIndex = 0;
+  for (let index = 1; index < rankSteps.length; index += 1) {
+    if (qualifies(rankSteps[index])) rankIndex = index;
+  }
+  const currentRank = rankSteps[rankIndex];
+  const nextRank = rankSteps[rankIndex + 1];
+  const rankProgress = nextRank
+    ? Math.min(
+        100,
+        Math.round(
+          Math.min(points / nextRank.points, 1) *
+            Math.min(quizzesCompleted / nextRank.quizzes, 1) *
+            Math.min(bestStreak / nextRank.streak, 1) *
+            (nextRank.improvements ? Math.min(improvements / nextRank.improvements, 1) : 1) *
+            100,
+        ),
+      )
+    : 100;
+  const weeklyTarget = 3;
+  const weeklyDays = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(startOfWeek);
+    day.setDate(day.getDate() + index);
+    const dayAttempts = weeksAttempts.filter(
+      (attempt) => new Date(attempt.created_at).toDateString() === day.toDateString(),
+    ).length;
+    return {
+      label: day.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 1),
+      count: dayAttempts,
+      isToday: day.toDateString() === todayKey,
+    };
+  });
+  const badges = [
+    {
+      name: "First Steps",
+      icon: "✦",
+      earned:
+        progress?.badges.some((badge) => badge.badge_id === "first_steps") ?? attempts.length > 0,
+      detail: "Complete your first quiz",
+    },
+    {
+      name: "Consistent Scholar",
+      icon: "🔥",
+      earned:
+        (progress?.badges.some((badge) => badge.badge_id === "daily_7") ?? false) ||
+        bestStreak >= 7,
+      detail: "Study for seven days in a row",
+    },
+    {
+      name: "Comeback",
+      icon: "↗",
+      earned:
+        (progress?.badges.some((badge) => badge.badge_id === "comeback") ?? false) ||
+        improvements > 0,
+      detail: "Improve on a previous score",
+    },
+    {
+      name: "Perfect Run",
+      icon: "★",
+      earned:
+        (progress?.badges.some((badge) => badge.badge_id === "perfect_score") ?? false) ||
+        attempts.some((attempt) => attempt.score_percent === 100),
+      detail: "Score 100% on a quiz",
+    },
+    {
+      name: "Helpful Contributor",
+      icon: "♡",
+      earned: progress?.badges.some((badge) => badge.badge_id === "helpful_contributor") ?? false,
+      detail: "Share a resource that helps classmates",
+    },
+    {
+      name: "Campus Connector",
+      icon: "◎",
+      earned: progress?.badges.some((badge) => badge.badge_id === "campus_connector") ?? false,
+      detail: "Help a classmate get started on Rimbly",
+    },
+    {
+      name: "Night Owl",
+      icon: "☾",
+      earned: attempts.some((attempt) => {
+        const hour = new Date(attempt.created_at).getHours();
+        return hour >= 21 || hour < 5;
+      }),
+      detail: "Complete a late-night study session",
+    },
+  ];
+  return (
+    <section className={`learning-progress-card ${animationsDisabled ? "motion-disabled" : ""}`}>
+      <header className="learning-progress-heading">
+        <div>
+          <span className="eyebrow">Your learning journey</span>
+          <h2>
+            {progressLoading
+              ? "Loading progress…"
+              : progress
+                ? currentRank.name
+                : "Rank unavailable"}
+          </h2>
+          <p>Progress is built from practice, consistency and improvement.</p>
+        </div>
+        <button
+          type="button"
+          className="celebration-toggle"
+          aria-pressed={animationsDisabled}
+          onClick={onToggleAnimations}
+        >
+          {animationsDisabled ? "Animations off" : "Animations on"}
+        </button>
+      </header>
+
+      <div className="learning-xp-panel">
+        <div className="learning-xp-topline">
+          <span>
+            <strong>{progressLoading ? "…" : progress ? points.toLocaleString() : "—"}</strong> XP
+          </span>
+          <span>
+            {progressLoading
+              ? "Syncing your XP"
+              : progress
+                ? nextRank
+                  ? `${nextRank.name} next`
+                  : "Top scholar rank"
+                : "Progress unavailable"}
+          </span>
+        </div>
+        <div
+          className="learning-progress-track"
+          role="progressbar"
+          aria-label="Progress toward next scholar rank"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={rankProgress}
+        >
+          <span style={{ width: `${rankProgress}%` }} />
+        </div>
+        <small>
+          {progressLoading
+            ? "Loading your saved study progress…"
+            : progressError
+              ? `Game progress could not load: ${progressError}`
+              : !progress
+                ? "Your quiz activity is still available below."
+                : nextRank
+                  ? `${Math.max(0, nextRank.points - points)} XP · ${Math.max(0, nextRank.quizzes - quizzesCompleted)} quizzes · ${Math.max(0, nextRank.streak - bestStreak)} streak days${Math.max(0, nextRank.improvements - improvements) ? ` · ${Math.max(0, nextRank.improvements - improvements)} score improvements` : ""} to ${nextRank.name}`
+                  : "You’ve reached the highest scholar rank."}
+        </small>
+      </div>
+
+      {streakRecovery?.eligible ? (
+        <div className="streak-recovery-callout" role="status">
+          <div>
+            <strong>
+              {streakRecovery.can_recover
+                ? "Welcome back. Your progress is still here."
+                : "Welcome back. A difficult day doesn’t erase your effort."}
+            </strong>
+            <p>
+              {streakRecovery.can_recover
+                ? `Your ${streakRecovery.eligible_streak_days}-day streak can be restored today. You have ${streakRecovery.tokens} recovery ${streakRecovery.tokens === 1 ? "token" : "tokens"}.`
+                : `You had a ${streakRecovery.eligible_streak_days}-day streak. Start a new one whenever you’re ready.`}
+            </p>
+          </div>
+          {streakRecovery.can_recover && (
+            <Button disabled={recoveryBusy} onClick={onRecoverStreak}>
+              {recoveryBusy ? "Restoring…" : "Use a recovery token"}
+            </Button>
+          )}
+        </div>
+      ) : streakRecovery && streakRecovery.tokens > 0 ? (
+        <p className="streak-recovery-note">
+          {streakRecovery.tokens} streak{" "}
+          {streakRecovery.tokens === 1 ? "recovery token is" : "recovery tokens are"} ready if you
+          need a gentle reset.
+        </p>
+      ) : null}
+
+      <div className="learning-insights">
+        <article>
+          <span>Latest score</span>
+          <strong>{attempts[0] ? `${attempts[0].score_percent}%` : "—"}</strong>
+          <small>
+            {scoreChange === null
+              ? "Your next quiz starts the comparison"
+              : `${scoreChange > 0 ? "+" : ""}${scoreChange} points vs. previous`}
+          </small>
+        </article>
+        <article>
+          <span>Strongest course</span>
+          <strong>{strongestCourse?.course.code ?? "—"}</strong>
+          <small>
+            {strongestCourse
+              ? `${strongestCourse.average}% average`
+              : "Scores appear after practice"}
+          </small>
+        </article>
+        <article>
+          <span>Focus opportunity</span>
+          <strong>{weakestCourse?.course.code ?? "—"}</strong>
+          <small>
+            {weakestCourse
+              ? `${weakestCourse.average}% average · keep building`
+              : "Try a course to find your strengths"}
+          </small>
+        </article>
+      </div>
+
+      <div className="learning-weekly">
+        <div className="learning-section-label">
+          <div>
+            <span className="eyebrow">Weekly rhythm</span>
+            <strong>
+              {Math.min(weeklyStudyDays, weeklyTarget)} of {weeklyTarget} study days
+            </strong>
+          </div>
+          <span>
+            {weeksAttempts.length} {weeksAttempts.length === 1 ? "quiz" : "quizzes"} this week
+          </span>
+        </div>
+        <div className="learning-week-bars" aria-label={`${weeklyStudyDays} study days this week`}>
+          {weeklyDays.map((day, index) => (
+            <span
+              className={`${day.count ? "studied" : ""} ${day.isToday ? "today" : ""}`}
+              key={`${day.label}-${index}`}
+            >
+              <i style={{ height: `${day.count ? Math.min(100, 34 + day.count * 24) : 12}%` }} />
+              <small>{day.label}</small>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="learning-missions">
+        <div className="learning-section-label">
+          <div>
+            <span className="eyebrow">Small steps, real progress</span>
+            <strong>This week’s study missions</strong>
+          </div>
+        </div>
+        <div className="learning-mission-list">
+          <article>
+            <span aria-hidden="true">◎</span>
+            <div>
+              <strong>Complete today’s study goal</strong>
+              <small>
+                {dailyGoalComplete
+                  ? `Done · +${dailyMission?.xp_earned ?? dailyMission?.xp_reward ?? 20} XP earned`
+                  : `Finish one quiz · +${dailyMission?.xp_reward ?? 20} XP`}
+              </small>
+            </div>
+            <b>{dailyGoalComplete ? "✓" : "Start"}</b>
+          </article>
+          <article>
+            <span aria-hidden="true">✦</span>
+            <div>
+              <strong>Study on three days</strong>
+              <small>
+                {Math.min(weeklyStudyDays, weeklyStudyMission?.target ?? weeklyTarget)} of{" "}
+                {weeklyStudyMission?.target ?? weeklyTarget} days · +
+                {weeklyStudyMission?.completed
+                  ? `${weeklyStudyMission.xp_earned} XP earned`
+                  : `${weeklyStudyMission?.xp_reward ?? 50} XP`}
+              </small>
+            </div>
+            <b>
+              {weeklyStudyMission?.completed
+                ? "✓"
+                : `${Math.max(0, (weeklyStudyMission?.target ?? weeklyTarget) - weeklyStudyDays)} left`}
+            </b>
+          </article>
+          <article>
+            <span aria-hidden="true">↗</span>
+            <div>
+              <strong>
+                {weakestCourse ? `Revisit ${weakestCourse.course.code}` : "Explore a new course"}
+              </strong>
+              <small>
+                {weakestCourse
+                  ? "A little practice can strengthen this area"
+                  : "Find a course that interests you"}
+              </small>
+            </div>
+            <b>
+              {weakestCourse
+                ? weeksAttempts.some(
+                    (attempt) =>
+                      attempt.paper_id &&
+                      paperCourseById.get(attempt.paper_id) === weakestCourse.course.id,
+                  )
+                  ? "✓"
+                  : "Try it"
+                : "Browse"}
+            </b>
+          </article>
+          <article>
+            <span aria-hidden="true">⚔</span>
+            <div>
+              <strong>Win a study battle</strong>
+              <small>
+                {weeklyBattleMission?.completed
+                  ? `Done · +${weeklyBattleMission.xp_earned} XP earned`
+                  : `Win once this week · +${weeklyBattleMission?.xp_reward ?? 30} XP`}
+              </small>
+            </div>
+            <button type="button" onClick={onBattle} disabled={weeklyBattleMission?.completed}>
+              {weeklyBattleMission?.completed ? "Done" : "Battle"}
+            </button>
+          </article>
+        </div>
+        <div className="learning-mission-actions">
+          <Button onClick={onQuiz}>Continue studying</Button>
+          <Button variant="secondary" onClick={onLeaderboard}>
+            See community progress
+          </Button>
+        </div>
+      </div>
+
+      <div className="learning-achievements">
+        <div className="learning-section-label">
+          <div>
+            <span className="eyebrow">Recognition for showing up</span>
+            <strong>Your achievements</strong>
+          </div>
+        </div>
+        <div className="learning-badges">
+          {badges.map((badge) => (
+            <article className={badge.earned ? "earned" : ""} key={badge.name} title={badge.detail}>
+              <span aria-hidden="true">{badge.icon}</span>
+              <strong>{badge.name}</strong>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function DailyChallengeCard({
   quiz,
   leaders,
@@ -2282,6 +2755,14 @@ function readCachedMaintenanceStatus(): MaintenanceStatus | null {
 
 function App() {
   const [route, setRoute] = useState<Route>(routeFromLocation);
+  const [animationsDisabled, setAnimationsDisabled] = useState(
+    () => window.localStorage.getItem("rimbly-disable-celebrations") === "true",
+  );
+  const toggleAnimations = () => {
+    const disabled = !animationsDisabled;
+    setAnimationsDisabled(disabled);
+    window.localStorage.setItem("rimbly-disable-celebrations", String(disabled));
+  };
   const [pendingBattleId, setPendingBattleId] = useState(pendingBattleInviteFromLocation);
   const [pendingReferralCode, setPendingReferralCode] = useState(pendingReferralCodeFromLocation);
   const [verificationEmail, setVerificationEmail] = useState(
@@ -2308,6 +2789,7 @@ function App() {
   const [ambassadorBusy, setAmbassadorBusy] = useState(false);
   const [ambassadorRetry, setAmbassadorRetry] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [progressActionBusy, setProgressActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(supabaseConfigurationError);
   const [notice, setNotice] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -3032,6 +3514,60 @@ function App() {
     await refreshRimblyBillingStatus();
   };
 
+  const handleStreakRecovery = async () => {
+    if (progressActionBusy) return;
+    setProgressActionBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await useStreakRecoveryToken();
+      setNotice(
+        `Your ${result.current_daily_streak}-day study streak is restored. Keep going at your own pace.`,
+      );
+      try {
+        await refreshActivity();
+      } catch (refreshError) {
+        setError(
+          `Your streak was restored, but progress could not refresh: ${refreshError instanceof Error ? refreshError.message : "unknown error"}`,
+        );
+      }
+    } catch (recoveryError) {
+      setError(
+        recoveryError instanceof Error
+          ? recoveryError.message
+          : "Could not restore your study streak.",
+      );
+    } finally {
+      setProgressActionBusy(false);
+    }
+  };
+
+  const handleEquipCollectible = async (collectibleId: ProfileCollectibleId | null) => {
+    if (progressActionBusy) return;
+    setProgressActionBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await equipProfileCollectible(collectibleId);
+      setNotice(
+        collectibleId ? "Your profile collectible is equipped." : "Your profile style is reset.",
+      );
+      try {
+        await refreshActivity();
+      } catch (refreshError) {
+        setError(
+          `Your collectible was equipped, but progress could not refresh: ${refreshError instanceof Error ? refreshError.message : "unknown error"}`,
+        );
+      }
+    } catch (equipError) {
+      setError(
+        equipError instanceof Error ? equipError.message : "Could not equip that collectible.",
+      );
+    } finally {
+      setProgressActionBusy(false);
+    }
+  };
+
   const handleAuth = async (event: FormEvent<HTMLFormElement>, mode: "signup" | "login") => {
     event.preventDefault();
     if (!supabase) return;
@@ -3043,12 +3579,18 @@ function App() {
     const password = String(form.get("password") ?? "");
     try {
       if (mode === "signup") {
+        const referralCode = String(form.get("referralCode") ?? "")
+          .trim()
+          .toUpperCase();
+        if (referralCode && !/^[A-F0-9]{10}$/.test(referralCode)) {
+          throw new Error("Referral codes must be 10 characters using A-F and 0-9.");
+        }
         const { data, error: authError } = await supabase.auth.signUp({
           email,
           password,
           options: {
             emailRedirectTo: routeUrl("onboarding"),
-            data: pendingReferralCode ? { rimbly_referral_code: pendingReferralCode } : undefined,
+            data: referralCode ? { rimbly_referral_code: referralCode } : undefined,
           },
         });
         if (authError) throw authError;
@@ -3066,6 +3608,8 @@ function App() {
       } else {
         const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
+        window.sessionStorage.removeItem(pendingReferralCodeStorageKey);
+        setPendingReferralCode(null);
         window.sessionStorage.removeItem("rimbly-verification-email");
         setVerificationEmail("");
         const postSignupRoute =
@@ -3720,9 +4264,19 @@ function App() {
           mode={route}
           busy={busy}
           error={pageError}
+          referralCode={pendingReferralCode}
           onSubmit={(event) => void handleAuth(event, route)}
           onNavigate={navigate}
           onClearError={() => setError(null)}
+          onReferralCodeChange={(value) => {
+            const referralCode = value.replace(/\s+/g, "").toUpperCase();
+            setPendingReferralCode(referralCode);
+            if (referralCode) {
+              window.sessionStorage.setItem(pendingReferralCodeStorageKey, referralCode);
+            } else {
+              window.sessionStorage.removeItem(pendingReferralCodeStorageKey);
+            }
+          }}
           configured={Boolean(supabase)}
         />
         {configurationBanner && (
@@ -3917,6 +4471,23 @@ function App() {
               dailyChallenge ? void startQuiz(dailyChallenge.id) : navigate("quiz-setup")
             }
             onPlans={() => navigate("subscription")}
+          />
+          <LearningProgressCard
+            attempts={attempts}
+            papers={papers}
+            courses={courses}
+            progress={gameProgress}
+            progressLoading={gameProgressLoading}
+            progressError={gameProgressError}
+            animationsDisabled={animationsDisabled}
+            onToggleAnimations={toggleAnimations}
+            recoveryBusy={progressActionBusy}
+            onRecoverStreak={() => void handleStreakRecovery()}
+            onQuiz={() =>
+              dailyChallenge ? void startQuiz(dailyChallenge.id) : navigate("quiz-setup")
+            }
+            onBattle={() => navigate("battle")}
+            onLeaderboard={() => navigate("leaderboard")}
           />
           {ambassadorDashboard?.status !== "removed" && (
             <section className="ambassador-home-prompt">
@@ -4437,6 +5008,7 @@ function App() {
             loading={gameProgressLoading}
             error={gameProgressError}
             isPro={Boolean(billingStatus?.is_pro)}
+            onEquipCollectible={(collectibleId) => void handleEquipCollectible(collectibleId)}
           />
           {ambassadorDashboard?.status !== "removed" && (
             <button className="ambassador-profile-link" onClick={() => navigate("ambassador")}>
@@ -4815,6 +5387,7 @@ function App() {
         ambassadorAvailable={
           ambassadorDashboard !== null && ambassadorDashboard.status !== "removed"
         }
+        animationsDisabled={animationsDisabled}
         onNavigate={navigate}
       >
         {content}
@@ -9503,13 +10076,34 @@ function GameProgressPanel({
   loading,
   error,
   isPro,
+  onEquipCollectible,
 }: {
   progress: GameProgress | null;
   loading: boolean;
   error: string | null;
   isPro: boolean;
+  onEquipCollectible: (collectibleId: ProfileCollectibleId | null) => void;
 }) {
   const badgeDefinitions = [
+    { id: "first_steps", name: "First Steps", description: "Complete your first quiz", icon: "✦" },
+    {
+      id: "comeback",
+      name: "Comeback",
+      description: "Improve on a previous quiz score",
+      icon: "↗",
+    },
+    {
+      id: "helpful_contributor",
+      name: "Helpful Contributor",
+      description: "Share a resource approved for classmates",
+      icon: "♡",
+    },
+    {
+      id: "campus_connector",
+      name: "Campus Connector",
+      description: "Help a classmate complete their first quiz",
+      icon: "◎",
+    },
     { id: "first_win", name: "First Victory", description: "Win your first battle", icon: "⚔" },
     {
       id: "perfect_score",
@@ -9534,9 +10128,59 @@ function GameProgressPanel({
     { id: "daily_30", name: "30-day Scholar", description: "Practice 30 days in a row", icon: "★" },
   ] as const;
   const earnedBadgeIds = new Set(progress?.badges.map((badge) => badge.badge_id) ?? []);
+  const collectibleDefinitions: Array<{
+    id: ProfileCollectibleId;
+    category: "frame" | "theme";
+    name: string;
+    description: string;
+    icon: string;
+  }> = [
+    {
+      id: "fresh_frame",
+      category: "frame",
+      name: "Fresh Start",
+      description: "Earned with your first quiz",
+      icon: "✦",
+    },
+    {
+      id: "community_frame",
+      category: "frame",
+      name: "Community",
+      description: "Earned by helping a classmate",
+      icon: "♡",
+    },
+    {
+      id: "focus_theme",
+      category: "theme",
+      name: "Focus",
+      description: "Earned with a seven-day study streak",
+      icon: "🔥",
+    },
+    {
+      id: "comeback_theme",
+      category: "theme",
+      name: "Comeback",
+      description: "Earned by improving a previous score",
+      icon: "↗",
+    },
+  ];
+  const equippedFrame = progress?.collectibles.find(
+    (collectible) => collectible.category === "frame" && collectible.equipped,
+  );
+  const equippedTheme = progress?.collectibles.find(
+    (collectible) => collectible.category === "theme" && collectible.equipped,
+  );
+  const collectibleClasses = [
+    equippedFrame?.collectible_id === "fresh_frame" ? "collectible-frame-fresh" : "",
+    equippedFrame?.collectible_id === "community_frame" ? "collectible-frame-community" : "",
+    equippedTheme?.collectible_id === "focus_theme" ? "collectible-theme-focus" : "",
+    equippedTheme?.collectible_id === "comeback_theme" ? "collectible-theme-comeback" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <section className="game-progress-panel">
+    <section className={`game-progress-panel ${collectibleClasses}`}>
       <div className="section-title">
         <div>
           <span>Your progress</span>
@@ -9605,6 +10249,50 @@ function GameProgressPanel({
               );
             })}
           </div>
+          <section className="profile-collectibles">
+            <div className="learning-section-label">
+              <div>
+                <span className="eyebrow">Make it yours</span>
+                <strong>Profile collectibles</strong>
+              </div>
+              {(equippedFrame || equippedTheme) && (
+                <button
+                  type="button"
+                  className="profile-collectible-reset"
+                  disabled={loading}
+                  onClick={() => onEquipCollectible(null)}
+                >
+                  Reset style
+                </button>
+              )}
+            </div>
+            <div className="profile-collectible-grid">
+              {collectibleDefinitions.map((definition) => {
+                const collectible = progress.collectibles.find(
+                  (item) => item.collectible_id === definition.id,
+                );
+                return (
+                  <article className={collectible ? "unlocked" : "locked"} key={definition.id}>
+                    <span aria-hidden="true">{definition.icon}</span>
+                    <div>
+                      <strong>
+                        {definition.name} {definition.category}
+                      </strong>
+                      <small>{definition.description}</small>
+                    </div>
+                    <button
+                      type="button"
+                      aria-pressed={collectible?.equipped ?? false}
+                      disabled={!collectible || collectible.equipped}
+                      onClick={() => onEquipCollectible(definition.id)}
+                    >
+                      {collectible?.equipped ? "Equipped" : collectible ? "Equip" : "Locked"}
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
         </>
       ) : null}
     </section>

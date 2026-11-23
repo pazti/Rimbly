@@ -21,9 +21,10 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    `admin-content-editing.sql`. It adds audited Super Admin editing for past-paper and
    shared course metadata, optional paper-file replacement, quiz revisions across
    creators, editable-draft takeover, and quiz archival across creators. Course metadata
-   changes apply to all papers linked to that course. These app changes are prepared in
-   the repository, but the migrations must be applied before the live database supports
-   them.
+   changes apply to all papers linked to that course. Also apply
+   `quiz-random-ten-questions.sql` before `quiz-learning-ux.sql`. These app changes are
+   prepared in the repository, but the migrations must be applied before the live
+   database supports them.
 6. Apply `gamification.sql` after the quiz migrations. Quizzes and battles award 10
    points per correct answer; battles add 25 points for a win or 8 for a draw.
    The migration adds UTC daily streaks, earned badges, and weekly/all-time
@@ -51,7 +52,8 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    `quiz-learning-ux.sql` to enable secure, post-submission answer review. The
    Home daily-goal card also reads remaining allowance and today's completed
    practice from the monetization status function.
-8. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
+8. Apply `harden-submission-workflows.sql` after `quiz-learning-ux.sql`.
+9. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate. Then apply `guest-explore.sql` to expose a bounded,
    read-only course and reviewed-quiz catalog to signed-out visitors. The public
    function does not return source file paths, question contents, or answer keys.
@@ -61,14 +63,24 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    expire after seven days and can only be accepted by active students at the
    inviter's university; the feed shows only recent quiz titles and dates, never
    player names.
-9. Deploy the two Supabase Edge Functions from the repository root:
+10. Apply `learning-rewards.sql` last, after all other database migrations above.
+    It records daily and weekly mission completion, awards 20 XP for the first reviewed
+    quiz each UTC day, 50 XP for studying on three days in a UTC week, and 30 XP for a
+    weekly battle win. Approved study-resource contributions award 50 XP; an ambassador
+    earns 100 XP when a referred student completes their first reviewed quiz. Rewards
+    and the First Steps, Comeback, Helpful Contributor, and Campus Connector badges are
+    idempotent; current-period mission progress is safely backfilled. A seven-day study
+    streak earns a recovery token (maximum two held), which can restore a streak after
+    one missed UTC day when the student returns to practice. Earned badges also unlock
+    profile frames and themes; users can equip one of each from their profile.
+11. Deploy the two Supabase Edge Functions from the repository root:
 
    ```sh
    supabase functions deploy admin-invite --project-ref YOUR_PROJECT_REF
    supabase functions deploy admin-student-access --project-ref YOUR_PROJECT_REF
    ```
 
-10. Configure the Supabase Edge Function secrets. Use the exact deployed app
+12. Configure the Supabase Edge Function secrets. Use the exact deployed app
     origin for `APP_URL` and keep these values in Supabase secrets:
 
 ```sh
