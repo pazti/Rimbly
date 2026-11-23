@@ -405,12 +405,13 @@ begin
     from (
       select attempt.score_percent, attempt.created_at
       from public.quiz_set_attempts attempt
+      join public.quiz_sets quiz on quiz.id = attempt.quiz_id
       where attempt.user_id = p_user_id
         and attempt.id <> p_attempt_id
         and attempt.created_at < p_created_at
         and (
           (p_quiz_id is not null and attempt.quiz_id = p_quiz_id)
-          or (p_paper_id is not null and attempt.paper_id = p_paper_id)
+          or (p_paper_id is not null and quiz.paper_id = p_paper_id)
         )
       union all
       select attempt.score_percent, attempt.created_at
@@ -419,7 +420,7 @@ begin
         and attempt.id <> p_attempt_id
         and attempt.created_at < p_created_at
         and p_paper_id is not null
-        and attempt.paper_id = p_paper_id
+        and nullif(to_jsonb(attempt)->>'paper_id', '')::uuid = p_paper_id
     ) prior
     order by prior.created_at desc
     limit 1
@@ -480,7 +481,9 @@ set search_path = pg_catalog, public
 as $$
 begin
   perform public.record_player_learning_quiz(
-    new.user_id, new.id, null, new.paper_id, new.score_percent, new.created_at
+    new.user_id, new.id, null,
+    nullif(to_jsonb(new)->>'paper_id', '')::uuid,
+    new.score_percent, new.created_at
   );
   return new;
 end;
@@ -716,11 +719,13 @@ from public.quiz_attempts attempt
 on conflict (user_id, badge_id) do nothing;
 
 with quiz_history as (
-  select attempt.user_id, attempt.quiz_id, attempt.paper_id,
+  select attempt.user_id, attempt.quiz_id, quiz.paper_id,
     attempt.score_percent, attempt.created_at
   from public.quiz_set_attempts attempt
+  join public.quiz_sets quiz on quiz.id = attempt.quiz_id
   union all
-  select attempt.user_id, null::uuid, attempt.paper_id,
+  select attempt.user_id, null::uuid,
+    nullif(to_jsonb(attempt)->>'paper_id', '')::uuid,
     attempt.score_percent, attempt.created_at
   from public.quiz_attempts attempt
 )
