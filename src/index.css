@@ -4625,6 +4625,86 @@ select {
 .ambassador-payout-note {
   margin-top: 12px;
 }
+.ambassador-payout-section {
+  display: grid;
+  gap: 14px;
+  padding: clamp(20px, 4vw, 32px);
+  border: 2px solid var(--ink);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 5px 5px 0 var(--ink);
+}
+.ambassador-payout-section .section-title {
+  margin-bottom: 0;
+}
+.ambassador-payout-intro,
+.ambassador-payout-schedule {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ambassador-payout-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.ambassador-payout-summary article {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid #e4d8f3;
+  border-radius: 12px;
+  background: #faf8ff;
+}
+.ambassador-payout-summary span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ambassador-payout-summary strong {
+  font-family: "Outfit", sans-serif;
+  font-size: clamp(18px, 4vw, 24px);
+}
+.ambassador-payout-form {
+  display: grid;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fcfbff;
+}
+.ambassador-payout-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.ambassador-payout-form label {
+  display: grid;
+  gap: 7px;
+}
+.ambassador-payout-form label > span {
+  font-size: 11px;
+  font-weight: 800;
+}
+.ambassador-payout-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #d6d1cc;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 13px;
+}
+.ambassador-payout-form > .btn {
+  justify-self: start;
+}
+.ambassador-payout-form > small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .ambassador-steps {
   display: grid;
   gap: 12px;
@@ -6239,6 +6319,35 @@ select {
   font: 800 20px "Outfit";
   overflow-wrap: anywhere;
 }
+.ambassador-admin-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.ambassador-admin-metrics article {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.ambassador-admin-metrics small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ambassador-admin-metrics strong {
+  font: 800 20px "Outfit";
+  overflow-wrap: anywhere;
+}
+.ambassador-admin-payout-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .activation-metrics-note,
 .activation-metrics-error p,
 .activation-metrics-error small {
@@ -7825,6 +7934,21 @@ select {
   display: grid;
   gap: 5px;
 }
+.admin-ambassador-payout-details {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 5px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.admin-ambassador-payout-details > strong {
+  margin-bottom: 2px;
+}
+.admin-ambassador-row > .admin-actions {
+  grid-column: 1 / -1;
+}
 
 .maintenance-toggle-copy strong {
   font-size: 14px;
@@ -7933,6 +8057,13 @@ select {
 }
 
 @media (max-width: 680px) {
+  .ambassador-payout-summary,
+  .ambassador-payout-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ambassador-admin-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .billing-pro-hero {
     grid-template-columns: minmax(0, 1fr);
   }

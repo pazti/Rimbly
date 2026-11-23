@@ -72,7 +72,12 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
     idempotent; current-period mission progress is safely backfilled. A seven-day study
     streak earns a recovery token (maximum two held), which can restore a streak after
     one missed UTC day when the student returns to practice. Earned badges also unlock
-    profile frames and themes; users can equip one of each from their profile.
+    profile frames and themes; users can equip one of each from their profile. Ambassador
+    payout accounts and the payout ledger are private: ambassadors manage their own
+    bank details, and only Super Admins can view full account details or payout metrics.
+    Transfers are manual, with a ₦5,000 minimum per ambassador and payouts recorded on
+    Sundays in Africa/Lagos time after the transfer is complete. This migration does
+    not initiate bank transfers.
 11. Deploy the two Supabase Edge Functions from the repository root:
 
    ```sh
@@ -173,5 +178,8 @@ the Edge Functions and must never be added to `.env` variables prefixed with
 
 Ambassador totals count account signups attributed at account creation. A reward is
 earned once, after the referred account completes its first reviewed quiz and loads the
-answer review. The dashboard records earnings; it does not initiate or process a
-cash payout.
+answer review. Ambassadors can save their payout account from the ambassador page and
+see earned, paid, and available totals. Super Admins can review program-wide metrics,
+view account details, and record a completed Sunday transfer with its bank reference.
+The payout action only records the external transfer; Rimbly does not initiate or
+process bank payments.

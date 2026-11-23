@@ -56,6 +56,30 @@ create table if not exists public.player_help_rewards (
 create index if not exists player_help_rewards_user_idx
   on public.player_help_rewards (user_id, earned_at desc);
 
+create table if not exists public.ambassador_payout_accounts (
+  user_id uuid primary key references public.ambassador_profiles(user_id) on delete cascade,
+  account_name text not null check (char_length(btrim(account_name)) between 2 and 100),
+  bank_name text not null check (char_length(btrim(bank_name)) between 2 and 100),
+  account_number text not null check (account_number ~ '^[0-9]{10}$'),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.ambassador_payouts (
+  id uuid primary key default gen_random_uuid(),
+  ambassador_user_id uuid not null references public.ambassador_profiles(user_id) on delete cascade,
+  amount_ngn bigint not null check (amount_ngn >= 5000),
+  transfer_reference text not null unique check (
+    char_length(btrim(transfer_reference)) between 1 and 120
+  ),
+  payout_date date not null,
+  paid_at timestamptz not null default now(),
+  paid_by uuid not null references auth.users(id),
+  unique (ambassador_user_id, payout_date)
+);
+
+create index if not exists ambassador_payouts_user_paid_idx
+  on public.ambassador_payouts (ambassador_user_id, paid_at desc);
+
 create table if not exists public.player_streak_recovery_state (
   user_id uuid primary key references auth.users(id) on delete cascade,
   token_count integer not null default 0 check (token_count between 0 and 2),
@@ -107,11 +131,14 @@ on conflict (user_id) do nothing;
 alter table public.player_mission_completions enable row level security;
 alter table public.player_study_days enable row level security;
 alter table public.player_help_rewards enable row level security;
+alter table public.ambassador_payout_accounts enable row level security;
+alter table public.ambassador_payouts enable row level security;
 alter table public.player_streak_recovery_state enable row level security;
 alter table public.player_streak_token_awards enable row level security;
 alter table public.player_profile_collectibles enable row level security;
 revoke all on public.player_mission_completions, public.player_study_days,
-  public.player_help_rewards, public.player_streak_recovery_state,
+  public.player_help_rewards, public.ambassador_payout_accounts,
+  public.ambassador_payouts, public.player_streak_recovery_state,
   public.player_streak_token_awards, public.player_profile_collectibles
   from public, anon, authenticated;
 
@@ -574,6 +601,315 @@ begin
       on referral.ambassador_user_id = ambassador.user_id
     where ambassador.user_id = auth.uid()
     group by ambassador.user_id;
+end;
+$$;
+
+create or replace function public.get_my_ambassador_payout_summary()
+returns table (
+  account_name text,
+  bank_name text,
+  account_number text,
+  account_updated_at timestamptz,
+  total_earned bigint,
+  total_paid bigint,
+  available_balance bigint,
+  minimum_payout bigint,
+  payout_window_open boolean,
+  next_payout_date date
+)
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  local_date date := (now() at time zone 'Africa/Lagos')::date;
+  local_day integer := extract(dow from now() at time zone 'Africa/Lagos')::integer;
+begin
+  if auth.uid() is null or public.current_user_is_suspended() then
+    raise exception 'An active signed-in account is required' using errcode = '42501';
+  end if;
+
+  return query
+    select payout_account.account_name,
+      payout_account.bank_name,
+      payout_account.account_number,
+      payout_account.updated_at,
+      coalesce(earned.total_earned, 0)::bigint,
+      coalesce(paid.total_paid, 0)::bigint,
+      greatest(coalesce(earned.total_earned, 0) - coalesce(paid.total_paid, 0), 0)::bigint,
+      5000::bigint,
+      local_day = 0,
+      local_date + case when local_day = 0 then 0 else 7 - local_day end
+    from public.ambassador_profiles ambassador
+    left join public.ambassador_payout_accounts payout_account
+      on payout_account.user_id = ambassador.user_id
+    left join lateral (
+      select coalesce(
+        sum(referral.reward_amount) filter (where referral.status = 'earned'), 0
+      )::bigint as total_earned
+      from public.ambassador_referrals referral
+      where referral.ambassador_user_id = ambassador.user_id
+    ) earned on true
+    left join lateral (
+      select coalesce(sum(payout.amount_ngn), 0)::bigint as total_paid
+      from public.ambassador_payouts payout
+      where payout.ambassador_user_id = ambassador.user_id
+    ) paid on true
+    where ambassador.user_id = auth.uid();
+end;
+$$;
+
+create or replace function public.save_my_ambassador_payout_account(
+  p_account_name text,
+  p_bank_name text,
+  p_account_number text
+)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  normalized_account_name text := nullif(btrim(coalesce(p_account_name, '')), '');
+  normalized_bank_name text := nullif(btrim(coalesce(p_bank_name, '')), '');
+  normalized_account_number text := btrim(coalesce(p_account_number, ''));
+begin
+  if auth.uid() is null or public.current_user_is_suspended() then
+    raise exception 'An active signed-in account is required' using errcode = '42501';
+  end if;
+  if normalized_account_name is null
+    or char_length(normalized_account_name) not between 2 and 100
+    or normalized_bank_name is null
+    or char_length(normalized_bank_name) not between 2 and 100
+    or normalized_account_number !~ '^[0-9]{10}$' then
+    raise exception 'Enter an account name, bank name, and 10-digit account number';
+  end if;
+  if not exists (
+    select 1
+    from public.ambassador_profiles ambassador
+    where ambassador.user_id = auth.uid()
+  ) then
+    raise exception 'Join the ambassador program before adding payout details';
+  end if;
+
+  insert into public.ambassador_payout_accounts (
+    user_id, account_name, bank_name, account_number, updated_at
+  )
+  values (
+    auth.uid(), normalized_account_name, normalized_bank_name,
+    normalized_account_number, now()
+  )
+  on conflict (user_id) do update
+  set account_name = excluded.account_name,
+      bank_name = excluded.bank_name,
+      account_number = excluded.account_number,
+      updated_at = now();
+end;
+$$;
+
+drop function if exists public.admin_list_ambassador_payouts();
+create function public.admin_list_ambassador_payouts()
+returns table (
+  user_id uuid,
+  full_name text,
+  email text,
+  invite_code text,
+  status text,
+  agreed_at timestamptz,
+  total_signups bigint,
+  total_activated bigint,
+  total_earned bigint,
+  payout_account_name text,
+  payout_bank_name text,
+  payout_account_number text,
+  payout_account_updated_at timestamptz,
+  total_paid bigint,
+  last_paid_at timestamptz,
+  last_transfer_reference text,
+  available_balance bigint,
+  payout_eligible boolean,
+  payout_window_open boolean
+)
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+begin
+  if auth.uid() is null or public.current_user_is_suspended() or not exists (
+    select 1
+    from public.admin_memberships membership
+    where membership.user_id = auth.uid()
+      and membership.role_id = 'super_admin'
+      and membership.status = 'active'
+  ) then
+    raise exception 'Super Admin access is required' using errcode = '42501';
+  end if;
+
+  return query
+    with referral_totals as (
+      select referral.ambassador_user_id,
+        count(referral.referred_user_id)
+          filter (where referral.status in ('pending', 'earned'))::bigint as total_signups,
+        count(referral.referred_user_id)
+          filter (where referral.status = 'earned')::bigint as total_activated,
+        coalesce(
+          sum(referral.reward_amount) filter (where referral.status = 'earned'), 0
+        )::bigint as total_earned
+      from public.ambassador_referrals referral
+      group by referral.ambassador_user_id
+    ),
+    payout_totals as (
+      select payout.ambassador_user_id,
+        coalesce(sum(payout.amount_ngn), 0)::bigint as total_paid,
+        max(payout.paid_at) as last_paid_at
+      from public.ambassador_payouts payout
+      group by payout.ambassador_user_id
+    )
+    select ambassador.user_id,
+      coalesce(profile.full_name, 'Student'),
+      coalesce(account.email, ''),
+      ambassador.invite_code,
+      ambassador.status,
+      ambassador.agreed_at,
+      coalesce(referral.total_signups, 0)::bigint,
+      coalesce(referral.total_activated, 0)::bigint,
+      coalesce(referral.total_earned, 0)::bigint,
+      payout_account.account_name,
+      payout_account.bank_name,
+      payout_account.account_number,
+      payout_account.updated_at,
+      coalesce(payout.total_paid, 0)::bigint,
+      payout.last_paid_at,
+      (
+        select latest_payout.transfer_reference
+        from public.ambassador_payouts latest_payout
+        where latest_payout.ambassador_user_id = ambassador.user_id
+        order by latest_payout.paid_at desc
+        limit 1
+      ),
+      greatest(
+        coalesce(referral.total_earned, 0) - coalesce(payout.total_paid, 0), 0
+      )::bigint,
+      greatest(
+        coalesce(referral.total_earned, 0) - coalesce(payout.total_paid, 0), 0
+      ) >= 5000,
+      extract(dow from now() at time zone 'Africa/Lagos')::integer = 0
+    from public.ambassador_profiles ambassador
+    left join public.profiles profile on profile.id = ambassador.user_id
+    left join auth.users account on account.id = ambassador.user_id
+    left join referral_totals referral on referral.ambassador_user_id = ambassador.user_id
+    left join payout_totals payout on payout.ambassador_user_id = ambassador.user_id
+    left join public.ambassador_payout_accounts payout_account
+      on payout_account.user_id = ambassador.user_id
+    order by ambassador.agreed_at desc;
+end;
+$$;
+
+create or replace function public.record_ambassador_payout(
+  p_ambassador_user_id uuid,
+  p_transfer_reference text
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  local_date date := (now() at time zone 'Africa/Lagos')::date;
+  local_day integer := extract(dow from now() at time zone 'Africa/Lagos')::integer;
+  earned_amount bigint;
+  paid_amount bigint;
+  payout_amount bigint;
+  payout_id uuid;
+  normalized_reference text := nullif(btrim(coalesce(p_transfer_reference, '')), '');
+begin
+  if auth.uid() is null or public.current_user_is_suspended() or not exists (
+    select 1
+    from public.admin_memberships membership
+    where membership.user_id = auth.uid()
+      and membership.role_id = 'super_admin'
+      and membership.status = 'active'
+  ) then
+    raise exception 'Super Admin access is required' using errcode = '42501';
+  end if;
+  if local_day <> 0 then
+    raise exception 'Ambassador payouts can only be recorded on Sunday (Africa/Lagos time)';
+  end if;
+  if normalized_reference is null or char_length(normalized_reference) > 120 then
+    raise exception 'Enter the transfer reference after completing the bank transfer';
+  end if;
+  if not exists (
+    select 1
+    from public.ambassador_profiles ambassador
+    where ambassador.user_id = p_ambassador_user_id
+  ) then
+    raise exception 'Ambassador account not found';
+  end if;
+  if not exists (
+    select 1
+    from public.ambassador_payout_accounts payout_account
+    where payout_account.user_id = p_ambassador_user_id
+  ) then
+    raise exception 'The ambassador has not added payout account details';
+  end if;
+
+  perform pg_advisory_xact_lock(
+    hashtextextended('ambassador-payout:' || p_ambassador_user_id::text, 0)
+  );
+
+  if exists (
+    select 1
+    from public.ambassador_payouts payout
+    where payout.ambassador_user_id = p_ambassador_user_id
+      and payout.payout_date = local_date
+  ) then
+    raise exception 'A payout has already been recorded for this ambassador today';
+  end if;
+
+  select coalesce(
+    sum(referral.reward_amount) filter (where referral.status = 'earned'), 0
+  )::bigint
+  into earned_amount
+  from public.ambassador_referrals referral
+  where referral.ambassador_user_id = p_ambassador_user_id;
+
+  select coalesce(sum(payout.amount_ngn), 0)::bigint
+  into paid_amount
+  from public.ambassador_payouts payout
+  where payout.ambassador_user_id = p_ambassador_user_id;
+
+  payout_amount := earned_amount - paid_amount;
+  if payout_amount < 5000 then
+    raise exception 'The ambassador has not reached the ₦5,000 minimum payout';
+  end if;
+
+  insert into public.ambassador_payouts (
+    ambassador_user_id, amount_ngn, transfer_reference, payout_date, paid_by
+  )
+  values (
+    p_ambassador_user_id, payout_amount, normalized_reference, local_date, auth.uid()
+  )
+  returning id into payout_id;
+
+  insert into public.admin_audit_logs (
+    actor_id, action, resource_type, resource_id, details
+  )
+  values (
+    auth.uid(),
+    'ambassador.payout_recorded',
+    'ambassador_payout',
+    payout_id::text,
+    jsonb_build_object(
+      'ambassador_user_id', p_ambassador_user_id,
+      'amount_ngn', payout_amount,
+      'transfer_reference', normalized_reference,
+      'payout_date', local_date
+    )
+  );
+
+  return payout_amount;
 end;
 $$;
 
@@ -1100,10 +1436,20 @@ revoke all on function public.set_profile_collectible(text)
   from public, anon;
 revoke all on function public.get_my_learning_missions() from public, anon;
 revoke all on function public.get_game_leaderboard(text, text) from public, anon;
+revoke all on function public.get_my_ambassador_payout_summary() from public, anon;
+revoke all on function public.save_my_ambassador_payout_account(text, text, text)
+  from public, anon;
+revoke all on function public.admin_list_ambassador_payouts() from public, anon;
+revoke all on function public.record_ambassador_payout(uuid, text) from public, anon;
 grant execute on function public.get_my_learning_missions() to authenticated;
 grant execute on function public.use_streak_recovery_token() to authenticated;
 grant execute on function public.set_profile_collectible(text) to authenticated;
 grant execute on function public.get_game_leaderboard(text, text) to authenticated;
+grant execute on function public.get_my_ambassador_payout_summary() to authenticated;
+grant execute on function public.save_my_ambassador_payout_account(text, text, text)
+  to authenticated;
+grant execute on function public.admin_list_ambassador_payouts() to authenticated;
+grant execute on function public.record_ambassador_payout(uuid, text) to authenticated;
 
 notify pgrst, 'reload schema';
 commit;

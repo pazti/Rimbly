@@ -445,10 +445,33 @@ export interface AmbassadorDashboard {
   total_earned: number;
 }
 
+export interface AmbassadorPayoutSummary {
+  account_name: string | null;
+  bank_name: string | null;
+  account_number: string | null;
+  account_updated_at: string | null;
+  total_earned: number;
+  total_paid: number;
+  available_balance: number;
+  minimum_payout: number;
+  payout_window_open: boolean;
+  next_payout_date: string;
+}
+
 export interface AdminAmbassador extends AmbassadorDashboard {
   user_id: string;
   full_name: string;
   email: string;
+  payout_account_name: string | null;
+  payout_bank_name: string | null;
+  payout_account_number: string | null;
+  payout_account_updated_at: string | null;
+  total_paid: number;
+  last_paid_at: string | null;
+  last_transfer_reference: string | null;
+  available_balance: number;
+  payout_eligible: boolean;
+  payout_window_open: boolean;
 }
 
 export interface MaintenanceStatus {
@@ -1441,6 +1464,35 @@ export async function getAmbassadorDashboard() {
   return ((data ?? [])[0] ?? null) as AmbassadorDashboard | null;
 }
 
+export async function getAmbassadorPayoutSummary() {
+  const { data, error } = await requireSupabase().rpc("get_my_ambassador_payout_summary");
+  if (error?.code === "PGRST202" || error?.code === "42883") {
+    throw new Error(
+      "Ambassador payouts are not configured yet. Apply supabase/learning-rewards.sql last, then reload the Supabase schema.",
+    );
+  }
+  if (error) throw error;
+  return ((data ?? [])[0] ?? null) as AmbassadorPayoutSummary | null;
+}
+
+export async function saveAmbassadorPayoutAccount(input: {
+  accountName: string;
+  bankName: string;
+  accountNumber: string;
+}) {
+  const { error } = await requireSupabase().rpc("save_my_ambassador_payout_account", {
+    p_account_name: input.accountName,
+    p_bank_name: input.bankName,
+    p_account_number: input.accountNumber,
+  });
+  if (error?.code === "PGRST202" || error?.code === "42883") {
+    throw new Error(
+      "Ambassador payouts are not configured yet. Apply supabase/learning-rewards.sql last, then reload the Supabase schema.",
+    );
+  }
+  if (error) throw error;
+}
+
 export async function agreeToAmbassadorTerms() {
   const { data, error } = await requireSupabase().rpc("become_ambassador", {
     p_terms_version: "2026-11-v1",
@@ -1452,14 +1504,28 @@ export async function agreeToAmbassadorTerms() {
 }
 
 export async function getAdminAmbassadors() {
-  const { data, error } = await requireSupabase().rpc("admin_list_ambassadors");
+  const { data, error } = await requireSupabase().rpc("admin_list_ambassador_payouts");
   if (error?.code === "PGRST202" || error?.code === "42883") {
     throw new Error(
-      "The ambassador admin RPC is unavailable. Apply supabase/ambassador-program.sql after the admin setup SQL, then reload the Supabase schema.",
+      "Ambassador payout details are not available yet. Apply supabase/learning-rewards.sql last, then reload the Supabase schema.",
     );
   }
   if (error) throw error;
   return (data ?? []) as AdminAmbassador[];
+}
+
+export async function recordAmbassadorPayout(userId: string, transferReference: string) {
+  const { data, error } = await requireSupabase().rpc("record_ambassador_payout", {
+    p_ambassador_user_id: userId,
+    p_transfer_reference: transferReference,
+  });
+  if (error?.code === "PGRST202" || error?.code === "42883") {
+    throw new Error(
+      "Ambassador payout recording is not available yet. Apply supabase/learning-rewards.sql last, then reload the Supabase schema.",
+    );
+  }
+  if (error) throw error;
+  return Number(data);
 }
 
 export async function setAdminAmbassadorStatus(

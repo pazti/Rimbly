@@ -16,6 +16,7 @@ import {
   AdminTeamMember,
   AdminAmbassador,
   AmbassadorDashboard,
+  AmbassadorPayoutSummary,
   MaintenanceStatus,
   RimblyBillingStatus,
   QuizAttemptReviewItem,
@@ -60,6 +61,9 @@ import {
   getAmbassadorDashboard,
   agreeToAmbassadorTerms,
   getAdminAmbassadors,
+  getAmbassadorPayoutSummary,
+  saveAmbassadorPayoutAccount,
+  recordAmbassadorPayout,
   setAdminAmbassadorStatus,
   getMaintenanceStatus,
   deleteAdminPaper,
@@ -2819,9 +2823,14 @@ function App() {
   const [adminAccessLoaded, setAdminAccessLoaded] = useState(false);
   const [adminAccessError, setAdminAccessError] = useState<string | null>(null);
   const [ambassadorDashboard, setAmbassadorDashboard] = useState<AmbassadorDashboard | null>(null);
+  const [ambassadorPayoutSummary, setAmbassadorPayoutSummary] =
+    useState<AmbassadorPayoutSummary | null>(null);
   const [ambassadorLoading, setAmbassadorLoading] = useState(false);
   const [ambassadorError, setAmbassadorError] = useState<string | null>(null);
+  const [ambassadorPayoutLoading, setAmbassadorPayoutLoading] = useState(false);
+  const [ambassadorPayoutError, setAmbassadorPayoutError] = useState<string | null>(null);
   const [ambassadorBusy, setAmbassadorBusy] = useState(false);
+  const [ambassadorPayoutSaving, setAmbassadorPayoutSaving] = useState(false);
   const [ambassadorRetry, setAmbassadorRetry] = useState(0);
   const [busy, setBusy] = useState(false);
   const [progressActionBusy, setProgressActionBusy] = useState(false);
@@ -3504,20 +3513,32 @@ function App() {
     if (!user || route !== "ambassador") return;
     let active = true;
     setAmbassadorLoading(true);
+    setAmbassadorPayoutLoading(true);
     setAmbassadorError(null);
-    void getAmbassadorDashboard()
-      .then((dashboard) => {
-        if (active) setAmbassadorDashboard(dashboard);
-      })
-      .catch((loadError: unknown) => {
-        if (active) {
+    setAmbassadorPayoutError(null);
+    void Promise.allSettled([getAmbassadorDashboard(), getAmbassadorPayoutSummary()])
+      .then(([dashboardResult, payoutResult]) => {
+        if (!active) return;
+        if (dashboardResult.status === "fulfilled") {
+          setAmbassadorDashboard(dashboardResult.value);
+        } else {
           setAmbassadorError(
-            loadError instanceof Error ? loadError.message : "Could not load ambassador details.",
+            getErrorMessage(dashboardResult.reason, "Could not load ambassador details."),
+          );
+        }
+        if (payoutResult.status === "fulfilled") {
+          setAmbassadorPayoutSummary(payoutResult.value);
+        } else {
+          setAmbassadorPayoutError(
+            getErrorMessage(payoutResult.reason, "Could not load payout details."),
           );
         }
       })
       .finally(() => {
-        if (active) setAmbassadorLoading(false);
+        if (active) {
+          setAmbassadorLoading(false);
+          setAmbassadorPayoutLoading(false);
+        }
       });
     return () => {
       active = false;
@@ -3776,6 +3797,37 @@ function App() {
     } finally {
       setAmbassadorBusy(false);
     }
+  };
+
+  const handleSaveAmbassadorPayoutAccount = async (input: {
+    accountName: string;
+    bankName: string;
+    accountNumber: string;
+  }) => {
+    if (!user) return false;
+    setAmbassadorPayoutSaving(true);
+    setAmbassadorPayoutError(null);
+    try {
+      await saveAmbassadorPayoutAccount(input);
+    } catch (saveError) {
+      setAmbassadorPayoutError(
+        getErrorMessage(saveError, "Could not save your payout account details."),
+      );
+      setAmbassadorPayoutSaving(false);
+      return false;
+    }
+
+    try {
+      setAmbassadorPayoutSummary(await getAmbassadorPayoutSummary());
+      setAmbassadorPayoutError(null);
+    } catch (refreshError) {
+      setAmbassadorPayoutError(
+        `Your account details were saved, but the payout summary could not refresh: ${getErrorMessage(refreshError, "unknown error")}`,
+      );
+    } finally {
+      setAmbassadorPayoutSaving(false);
+    }
+    return true;
   };
 
   const handleToggleSaved = async (courseId: string) => {
@@ -4195,9 +4247,14 @@ function App() {
       <AmbassadorPage
         signedIn={false}
         dashboard={null}
+        payoutSummary={null}
         loading={false}
         error={null}
         busy={false}
+        payoutLoading={false}
+        payoutError={null}
+        payoutSaving={false}
+        onSavePayoutAccount={async () => false}
         onAgree={() => startAmbassadorFlow()}
         onRetry={() => {}}
         onSignIn={startAmbassadorSignIn}
@@ -5283,9 +5340,14 @@ function App() {
         <AmbassadorPage
           signedIn
           dashboard={ambassadorDashboard}
+          payoutSummary={ambassadorPayoutSummary}
           loading={ambassadorLoading}
           error={ambassadorError}
           busy={ambassadorBusy}
+          payoutLoading={ambassadorPayoutLoading}
+          payoutError={ambassadorPayoutError}
+          payoutSaving={ambassadorPayoutSaving}
+          onSavePayoutAccount={handleSaveAmbassadorPayoutAccount}
           onAgree={() => void handleAgreeToAmbassadorTerms()}
           onRetry={() => setAmbassadorRetry((retry) => retry + 1)}
           onSignIn={() => navigate("login")}
@@ -5442,9 +5504,14 @@ function App() {
 function AmbassadorPage({
   signedIn,
   dashboard,
+  payoutSummary,
   loading,
   error,
   busy,
+  payoutLoading,
+  payoutError,
+  payoutSaving,
+  onSavePayoutAccount,
   onAgree,
   onRetry,
   onSignIn,
@@ -5452,9 +5519,18 @@ function AmbassadorPage({
 }: {
   signedIn: boolean;
   dashboard: AmbassadorDashboard | null;
+  payoutSummary: AmbassadorPayoutSummary | null;
   loading: boolean;
   error: string | null;
   busy: boolean;
+  payoutLoading: boolean;
+  payoutError: string | null;
+  payoutSaving: boolean;
+  onSavePayoutAccount: (input: {
+    accountName: string;
+    bankName: string;
+    accountNumber: string;
+  }) => Promise<boolean>;
   onAgree: () => void;
   onRetry: () => void;
   onSignIn: () => void;
@@ -5464,6 +5540,15 @@ function AmbassadorPage({
   const [accepted, setAccepted] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
+  const [payoutAccountName, setPayoutAccountName] = useState("");
+  const [payoutBankName, setPayoutBankName] = useState("");
+  const [payoutAccountNumber, setPayoutAccountNumber] = useState("");
+  const [payoutNotice, setPayoutNotice] = useState<string | null>(null);
+  useEffect(() => {
+    setPayoutAccountName(payoutSummary?.account_name ?? "");
+    setPayoutBankName(payoutSummary?.bank_name ?? "");
+    setPayoutAccountNumber(payoutSummary?.account_number ?? "");
+  }, [payoutSummary?.account_updated_at]);
   const pendingReferrals = dashboard
     ? Math.max(0, dashboard.total_signups - dashboard.total_activated)
     : 0;
@@ -5472,6 +5557,25 @@ function AmbassadorPage({
     ? `${window.location.origin}/?route=signup&ref=${encodeURIComponent(dashboard.invite_code)}`
     : "";
   const shareText = `Join me on Rimbly for university-focused past questions and reviewed quizzes: ${inviteUrl}`;
+  const nextPayoutDate = payoutSummary
+    ? new Date(`${payoutSummary.next_payout_date}T12:00:00+01:00`).toLocaleDateString("en-NG", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        timeZone: "Africa/Lagos",
+      })
+    : null;
+
+  const submitPayoutDetails = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPayoutNotice(null);
+    const saved = await onSavePayoutAccount({
+      accountName: payoutAccountName.trim(),
+      bankName: payoutBankName.trim(),
+      accountNumber: payoutAccountNumber,
+    });
+    if (saved) setPayoutNotice("Your payout account details were saved.");
+  };
 
   const copyText = async (value: string, copiedItem: "link" | "code") => {
     try {
@@ -5658,6 +5762,118 @@ function AmbassadorPage({
               after the student completes a reviewed quiz. Payment arrangements are communicated by
               Rimbly.
             </p>
+          </section>
+        )}
+
+        {signedIn && dashboard && (
+          <section className="ambassador-payout-section">
+            <div className="section-title">
+              <div>
+                <span>Paid every Sunday · ₦5,000 minimum</span>
+                <h2>Payout account</h2>
+              </div>
+            </div>
+            <p className="ambassador-payout-intro">
+              Confirmed rewards build in your balance. Rimbly arranges transfers manually each
+              Sunday once your unpaid balance reaches ₦5,000. Below-minimum balances roll over.
+            </p>
+            {payoutLoading ? (
+              <p className="field-note" role="status">
+                Loading payout details…
+              </p>
+            ) : (
+              payoutSummary && (
+                <>
+                  <div className="ambassador-payout-summary">
+                    <article>
+                      <span>Confirmed earned</span>
+                      <strong>₦{payoutSummary.total_earned.toLocaleString("en-NG")}</strong>
+                    </article>
+                    <article>
+                      <span>Paid to date</span>
+                      <strong>₦{payoutSummary.total_paid.toLocaleString("en-NG")}</strong>
+                    </article>
+                    <article>
+                      <span>Available balance</span>
+                      <strong>₦{payoutSummary.available_balance.toLocaleString("en-NG")}</strong>
+                    </article>
+                  </div>
+                  <p className="ambassador-payout-schedule">
+                    {payoutSummary.payout_window_open
+                      ? "Today is payout Sunday."
+                      : `Next payout day: Sunday, ${nextPayoutDate}.`}
+                    {payoutSummary.available_balance >= payoutSummary.minimum_payout
+                      ? " Your balance meets the minimum."
+                      : ` Your balance needs ₦${(payoutSummary.minimum_payout - payoutSummary.available_balance).toLocaleString("en-NG")} more to reach the minimum.`}
+                  </p>
+                </>
+              )
+            )}
+            {payoutError && (
+              <p className="app-feedback" role="alert">
+                {payoutError}
+              </p>
+            )}
+            {payoutNotice && (
+              <p className="app-notice" role="status">
+                {payoutNotice}
+              </p>
+            )}
+            <form
+              className="ambassador-payout-form"
+              onSubmit={(event) => void submitPayoutDetails(event)}
+            >
+              <div className="ambassador-payout-form-grid">
+                <label>
+                  <span>Account name</span>
+                  <input
+                    autoComplete="name"
+                    maxLength={100}
+                    required
+                    value={payoutAccountName}
+                    onChange={(event) => {
+                      setPayoutNotice(null);
+                      setPayoutAccountName(event.target.value);
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Bank name</span>
+                  <input
+                    autoComplete="off"
+                    maxLength={100}
+                    required
+                    value={payoutBankName}
+                    onChange={(event) => {
+                      setPayoutNotice(null);
+                      setPayoutBankName(event.target.value);
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>10-digit account number</span>
+                  <input
+                    autoComplete="off"
+                    inputMode="numeric"
+                    maxLength={10}
+                    pattern="[0-9]{10}"
+                    required
+                    value={payoutAccountNumber}
+                    onChange={(event) => {
+                      setPayoutNotice(null);
+                      setPayoutAccountNumber(event.target.value.replace(/\D/g, "").slice(0, 10));
+                    }}
+                  />
+                </label>
+              </div>
+              <Button type="submit" disabled={payoutSaving || payoutLoading}>
+                {payoutSaving ? "Saving details…" : "Save payout account"}
+              </Button>
+              <small>
+                Use the exact account name registered with your bank. Only you and Rimbly Super
+                Admins can view the full account number.
+              </small>
+            </form>
           </section>
         )}
 
@@ -6072,6 +6288,33 @@ function AdminWorkspace({
   const canManageAcademics = Boolean(access?.permissions.includes("academics.manage"));
   const canManageMaintenance = access?.role === "super_admin";
   const canManageAmbassadors = access?.role === "super_admin";
+  const ambassadorPayoutMetrics = ambassadors.reduce(
+    (totals, ambassador) => {
+      totals.signups += ambassador.total_signups;
+      totals.activated += ambassador.total_activated;
+      totals.earned += ambassador.total_earned;
+      totals.paid += ambassador.total_paid;
+      totals.balance += ambassador.available_balance;
+      if (ambassador.payout_eligible) totals.minimumReached += 1;
+      if (
+        ambassador.payout_window_open &&
+        ambassador.payout_eligible &&
+        ambassador.payout_account_number
+      ) {
+        totals.readyToday += ambassador.available_balance;
+      }
+      return totals;
+    },
+    {
+      signups: 0,
+      activated: 0,
+      earned: 0,
+      paid: 0,
+      balance: 0,
+      minimumReached: 0,
+      readyToday: 0,
+    },
+  );
 
   useEffect(() => {
     setMaintenanceEnabled(maintenanceStatus?.active ?? false);
@@ -6545,6 +6788,47 @@ function AdminWorkspace({
       setAmbassadorsError(
         statusError instanceof Error ? statusError.message : "Could not update ambassador status.",
       );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRecordAmbassadorPayout = async (ambassador: AdminAmbassador) => {
+    if (
+      !ambassador.payout_window_open ||
+      !ambassador.payout_eligible ||
+      !ambassador.payout_account_number
+    ) {
+      return;
+    }
+    const formattedAmount = `₦${ambassador.available_balance.toLocaleString("en-NG")}`;
+    if (
+      !window.confirm(
+        `Confirm you have transferred ${formattedAmount} to ${ambassador.full_name} using the account shown below.`,
+      )
+    ) {
+      return;
+    }
+    const transferReference = window
+      .prompt("Enter the bank transfer reference for this completed payout.")
+      ?.trim();
+    if (!transferReference) return;
+
+    setBusyId(`payout:${ambassador.user_id}`);
+    setAmbassadorsError(null);
+    setNotice(null);
+    try {
+      const amount = await recordAmbassadorPayout(ambassador.user_id, transferReference);
+      setNotice(`₦${amount.toLocaleString("en-NG")} payout recorded for ${ambassador.full_name}.`);
+      try {
+        setAmbassadors(await getAdminAmbassadors());
+      } catch (refreshError) {
+        setAmbassadorsError(
+          `Payout was recorded, but the ambassador list could not be refreshed: ${getErrorMessage(refreshError, "Please reload the page.")}`,
+        );
+      }
+    } catch (payoutError) {
+      setAmbassadorsError(getErrorMessage(payoutError, "Could not record the ambassador payout."));
     } finally {
       setBusyId(null);
     }
@@ -7160,6 +7444,47 @@ function AdminWorkspace({
                         : `${ambassadors.length} ambassadors`}
                   </span>
                 </div>
+                {!ambassadorsLoading && !ambassadorsError && (
+                  <div className="ambassador-admin-metrics">
+                    <article>
+                      <small>Ambassadors</small>
+                      <strong>{ambassadors.length.toLocaleString()}</strong>
+                    </article>
+                    <article>
+                      <small>Signups</small>
+                      <strong>{ambassadorPayoutMetrics.signups.toLocaleString()}</strong>
+                    </article>
+                    <article>
+                      <small>First-quiz activations</small>
+                      <strong>{ambassadorPayoutMetrics.activated.toLocaleString()}</strong>
+                    </article>
+                    <article>
+                      <small>Confirmed earned</small>
+                      <strong>₦{ambassadorPayoutMetrics.earned.toLocaleString("en-NG")}</strong>
+                    </article>
+                    <article>
+                      <small>Paid to date</small>
+                      <strong>₦{ambassadorPayoutMetrics.paid.toLocaleString("en-NG")}</strong>
+                    </article>
+                    <article>
+                      <small>Outstanding</small>
+                      <strong>₦{ambassadorPayoutMetrics.balance.toLocaleString("en-NG")}</strong>
+                    </article>
+                    <article>
+                      <small>Reached ₦5,000 minimum</small>
+                      <strong>{ambassadorPayoutMetrics.minimumReached.toLocaleString()}</strong>
+                    </article>
+                    <article>
+                      <small>Ready to pay today</small>
+                      <strong>₦{ambassadorPayoutMetrics.readyToday.toLocaleString("en-NG")}</strong>
+                    </article>
+                  </div>
+                )}
+                <p className="ambassador-admin-payout-note">
+                  Payouts are manual bank transfers, recorded here only after they are sent.
+                  Transfers can be recorded on Sundays (Africa/Lagos time), at a minimum of ₦5,000
+                  per ambassador.
+                </p>
                 {ambassadorsError && (
                   <>
                     <p className="app-feedback" role="alert">
@@ -7194,7 +7519,9 @@ function AdminWorkspace({
                         <small>
                           {ambassador.total_signups} signups · {ambassador.total_activated}{" "}
                           activated
-                          {" · "}₦{ambassador.total_earned.toLocaleString()} earned
+                          {" · "}₦{ambassador.total_earned.toLocaleString("en-NG")} earned
+                          {" · "}₦{ambassador.total_paid.toLocaleString("en-NG")} paid
+                          {" · "}₦{ambassador.available_balance.toLocaleString("en-NG")} outstanding
                         </small>
                       </div>
                       <span
@@ -7202,7 +7529,56 @@ function AdminWorkspace({
                       >
                         {ambassador.status}
                       </span>
+                      <div className="admin-ambassador-payout-details">
+                        <strong>Payout account</strong>
+                        {ambassador.payout_account_number ? (
+                          <>
+                            <span>
+                              {ambassador.payout_account_name} · {ambassador.payout_bank_name}
+                            </span>
+                            <span>Account number: {ambassador.payout_account_number}</span>
+                            {ambassador.payout_account_updated_at && (
+                              <small>
+                                Last updated{" "}
+                                {new Date(ambassador.payout_account_updated_at).toLocaleString()}
+                              </small>
+                            )}
+                          </>
+                        ) : (
+                          <small>Ambassador has not added payout account details.</small>
+                        )}
+                        {ambassador.last_paid_at && (
+                          <small>
+                            Last payout: {new Date(ambassador.last_paid_at).toLocaleString()}
+                          </small>
+                        )}
+                        {ambassador.last_transfer_reference && (
+                          <small>
+                            Last transfer reference: {ambassador.last_transfer_reference}
+                          </small>
+                        )}
+                      </div>
                       <div className="admin-actions">
+                        <Button
+                          variant="secondary"
+                          disabled={
+                            Boolean(busyId) ||
+                            !ambassador.payout_window_open ||
+                            !ambassador.payout_eligible ||
+                            !ambassador.payout_account_number
+                          }
+                          onClick={() => void handleRecordAmbassadorPayout(ambassador)}
+                        >
+                          {busyId === `payout:${ambassador.user_id}`
+                            ? "Recording payout…"
+                            : !ambassador.payout_account_number
+                              ? "Awaiting bank details"
+                              : !ambassador.payout_eligible
+                                ? "Below ₦5,000 minimum"
+                                : !ambassador.payout_window_open
+                                  ? "Record on Sunday"
+                                  : "Record completed transfer"}
+                        </Button>
                         {ambassador.status !== "active" && (
                           <Button
                             variant="secondary"
