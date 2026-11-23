@@ -541,6 +541,42 @@ create trigger record_ambassador_activation_reward
 after update of status on public.ambassador_referrals
 for each row execute function public.record_ambassador_activation_reward();
 
+create or replace function public.get_ambassador_dashboard()
+returns table (
+  invite_code text,
+  status text,
+  agreed_at timestamptz,
+  total_signups bigint,
+  total_activated bigint,
+  total_earned bigint
+)
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+begin
+  if auth.uid() is null or public.current_user_is_suspended() then
+    raise exception 'An active signed-in account is required' using errcode = '42501';
+  end if;
+
+  return query
+    select ambassador.invite_code, ambassador.status, ambassador.agreed_at,
+      count(referral.referred_user_id)
+        filter (where referral.status in ('pending', 'earned'))::bigint,
+      count(referral.referred_user_id)
+        filter (where referral.status = 'earned')::bigint,
+      coalesce(
+        sum(referral.reward_amount) filter (where referral.status = 'earned'), 0
+      )::bigint
+    from public.ambassador_profiles ambassador
+    left join public.ambassador_referrals referral
+      on referral.ambassador_user_id = ambassador.user_id
+    where ambassador.user_id = auth.uid()
+    group by ambassador.user_id;
+end;
+$$;
+
 create or replace function public.record_weekly_battle_mission()
 returns trigger
 language plpgsql

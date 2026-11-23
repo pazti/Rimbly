@@ -2492,14 +2492,35 @@ function SubscriptionPage({
 
   return (
     <>
-      <div className="page-head compact">
-        <span className="eyebrow">Learn more, keep your momentum</span>
-        <h1>Rimbly Pro</h1>
-        <p>
-          More practice, deeper insight, and a little extra campus flair. Your past-question library
-          stays free.
-        </p>
-      </div>
+      <section className="billing-pro-hero" aria-labelledby="billing-pro-title">
+        <div className="billing-pro-hero-copy">
+          <span className="billing-pro-kicker">✦ RIMBLY PRO</span>
+          <h1 id="billing-pro-title">
+            {status?.is_pro ? "Keep your study momentum." : "Make more room to improve."}
+          </h1>
+          <p>
+            {status?.is_pro
+              ? "Your Pro tools are ready whenever you are: practice without daily limits and keep an eye on your progress."
+              : "Practise without daily limits, see how your scores are changing, and show off your Pro Scholar status."}
+          </p>
+          <div className="billing-pro-benefits">
+            <span>Unlimited quiz practice</span>
+            <span>30-day performance insights</span>
+            <span>Pro Scholar flair</span>
+          </div>
+          <a className="billing-pro-cta" href="#rimbly-pro-plans">
+            {status?.is_pro ? "View plan options" : "Explore Pro plans"}{" "}
+            <span aria-hidden="true">→</span>
+          </a>
+          <small>Past-question library stays free · One-time plans, no auto-renewal</small>
+        </div>
+        <div className="billing-pro-hero-mark" aria-hidden="true">
+          <span>STUDY WITH</span>
+          <strong>PRO</strong>
+          <i>✦</i>
+          <small>Make every session count</small>
+        </div>
+      </section>
       {paymentReference && (
         <div className={`billing-payment-message ${paymentFailed ? "failed" : ""}`} role="status">
           <div>
@@ -2571,7 +2592,7 @@ function SubscriptionPage({
         </div>
       </section>
 
-      <section className="billing-plans">
+      <section className="billing-plans" id="rimbly-pro-plans">
         <div className="section-title">
           <div>
             <span>Choose your term</span>
@@ -5425,9 +5446,14 @@ function AmbassadorPage({
   onSignIn: () => void;
   onNavigate: (route: Route) => void;
 }) {
+  const rewardPerActivation = 250;
   const [accepted, setAccepted] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
+  const pendingReferrals = dashboard
+    ? Math.max(0, dashboard.total_signups - dashboard.total_activated)
+    : 0;
+  const pendingReward = pendingReferrals * rewardPerActivation;
   const inviteUrl = dashboard
     ? `${window.location.origin}/?route=signup&ref=${encodeURIComponent(dashboard.invite_code)}`
     : "";
@@ -5601,14 +5627,22 @@ function AmbassadorPage({
                 <strong>{dashboard.total_activated.toLocaleString()}</strong>
                 <span>Activated students</span>
               </article>
+              <article className="ambassador-pending-stat">
+                <strong>₦{pendingReward.toLocaleString("en-NG")}</strong>
+                <span>Potential pending reward</span>
+                <small>
+                  {pendingReferrals.toLocaleString()} still need their first reviewed quiz
+                </small>
+              </article>
               <article>
-                <strong>₦{dashboard.total_earned.toLocaleString()}</strong>
-                <span>Earned</span>
+                <strong>₦{dashboard.total_earned.toLocaleString("en-NG")}</strong>
+                <span>Confirmed earned</span>
               </article>
             </div>
             <p className="ambassador-payout-note">
-              Earnings show confirmed ₦250 rewards. Payment arrangements will be communicated by
-              Rimbly; no payment is issued for an empty account.
+              Potential pending rewards are estimates, not earnings. Each referral is confirmed only
+              after the student completes a reviewed quiz. Payment arrangements are communicated by
+              Rimbly.
             </p>
           </section>
         )}
