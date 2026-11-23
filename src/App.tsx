@@ -2213,6 +2213,42 @@ function UsageMeter({
   );
 }
 
+const maintenanceStatusCacheKey = "rimbly-maintenance-status";
+
+function readCachedMaintenanceStatus(): MaintenanceStatus | null {
+  try {
+    const cached = window.localStorage.getItem(maintenanceStatusCacheKey);
+    if (!cached) return null;
+
+    const value: unknown = JSON.parse(cached);
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      !("active" in value) ||
+      typeof value.active !== "boolean" ||
+      !("title" in value) ||
+      typeof value.title !== "string" ||
+      !("message" in value) ||
+      typeof value.message !== "string" ||
+      !("ends_at" in value) ||
+      (value.ends_at !== null && typeof value.ends_at !== "string") ||
+      !("updated_at" in value) ||
+      typeof value.updated_at !== "string"
+    ) {
+      return null;
+    }
+
+    const status = value as MaintenanceStatus;
+    const endTime = status.ends_at ? Date.parse(status.ends_at) : Number.NaN;
+    return {
+      ...status,
+      active: status.active && Number.isFinite(endTime) && endTime > Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function App() {
   const [route, setRoute] = useState<Route>(routeFromLocation);
   const [pendingBattleId, setPendingBattleId] = useState(pendingBattleInviteFromLocation);
@@ -2221,9 +2257,15 @@ function App() {
   );
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [maintenanceStatus, setMaintenanceStatusState] = useState<MaintenanceStatus | null>(null);
-  const [maintenanceStatusLoaded, setMaintenanceStatusLoaded] = useState(false);
+  const [maintenanceStatus, setMaintenanceStatusState] = useState<MaintenanceStatus | null>(
+    readCachedMaintenanceStatus,
+  );
+  const [maintenanceStatusLoaded, setMaintenanceStatusLoaded] = useState(
+    () => readCachedMaintenanceStatus() !== null,
+  );
   const [maintenanceStatusError, setMaintenanceStatusError] = useState<string | null>(null);
+  const [maintenanceStatusRetry, setMaintenanceStatusRetry] = useState(0);
+  const hasUsableMaintenanceStatus = useRef(maintenanceStatus !== null);
   const [loading, setLoading] = useState(false);
   const [adminAccess, setAdminAccess] = useState<AdminAccess | null>(null);
   const [adminAccessLoaded, setAdminAccessLoaded] = useState(false);
@@ -2449,10 +2491,12 @@ function App() {
 
   useEffect(() => {
     if (!supabase) {
-      setMaintenanceStatusError(
-        supabaseConfigurationError ?? "The maintenance status service is unavailable.",
-      );
-      setMaintenanceStatusLoaded(true);
+      if (!hasUsableMaintenanceStatus.current) {
+        setMaintenanceStatusError(
+          supabaseConfigurationError ?? "The maintenance status service is unavailable.",
+        );
+        setMaintenanceStatusLoaded(true);
+      }
       return;
     }
 
@@ -2462,14 +2506,22 @@ function App() {
         const status = await getMaintenanceStatus();
         if (!active) return;
         setMaintenanceStatusState(status);
+        hasUsableMaintenanceStatus.current = true;
+        try {
+          window.localStorage.setItem(maintenanceStatusCacheKey, JSON.stringify(status));
+        } catch (cacheError) {
+          console.warn("Could not cache the latest maintenance status.", cacheError);
+        }
         setMaintenanceStatusError(null);
       } catch (statusError) {
         if (!active) return;
-        setMaintenanceStatusError(
-          statusError instanceof Error
-            ? statusError.message
-            : "Could not check whether the website is under maintenance.",
-        );
+        if (!hasUsableMaintenanceStatus.current) {
+          setMaintenanceStatusError(
+            statusError instanceof Error
+              ? statusError.message
+              : "Could not check whether the website is under maintenance.",
+          );
+        }
       } finally {
         if (active) setMaintenanceStatusLoaded(true);
       }
@@ -2481,7 +2533,7 @@ function App() {
       active = false;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [maintenanceStatusRetry]);
 
   useEffect(() => {
     if (!user) {
@@ -3313,17 +3365,31 @@ function App() {
 
   const isSuperAdmin = adminAccess?.role === "super_admin";
   if (route !== "login" && maintenanceStatusError) {
+    const maintenanceSetupMissing = maintenanceStatusError.includes(
+      "Maintenance controls are not installed yet",
+    );
     return (
       <div className="maintenance-error-page" role="alert">
         <span className="eyebrow">Website availability</span>
-        <h1>We can’t check the site status.</h1>
+        <h1>
+          {maintenanceSetupMissing ? "Maintenance check needs setup." : "Connection interrupted."}
+        </h1>
         <p>{maintenanceStatusError}</p>
-        <p>
-          For safety, sign in as a Super Admin or try again after the maintenance setup is fixed.
-        </p>
-        <Button onClick={() => void handleMaintenanceAdminSignIn()}>
-          {user ? "Switch account" : "Super Admin sign in"}
-        </Button>
+        {maintenanceSetupMissing ? (
+          <>
+            <p>Ask a Super Admin to apply the maintenance setup before continuing.</p>
+            <Button onClick={() => void handleMaintenanceAdminSignIn()}>
+              {user ? "Switch account" : "Super Admin sign in"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <p>We couldn’t verify the site status. Check your connection and try again.</p>
+            <Button onClick={() => setMaintenanceStatusRetry((attempt) => attempt + 1)}>
+              Try again
+            </Button>
+          </>
+        )}
       </div>
     );
   }
