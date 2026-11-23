@@ -10,6 +10,7 @@ import {
   AdminQuizPaper,
   AdminQuizSet,
   AdminPaper,
+  AdminPaperUpdateInput,
   AdminOverview,
   AdminStudent,
   AdminTeamMember,
@@ -50,12 +51,16 @@ import {
   getAdminTeam,
   getAdminUniversities,
   getAdminOverview,
+  removeAdminPaperFile,
   recordReviewedQuizActivation,
   getMaintenanceStatus,
   deleteAdminPaper,
+  takeOverAdminQuizDraft,
   inviteAdmin,
   publishAdminPaper,
   publishAdminQuiz,
+  uploadAdminPaperReplacement,
+  updateAdminPaper,
   saveAdminQuizDraft,
   requestAdminQuizReview,
   reviewAdminQuiz,
@@ -4655,6 +4660,184 @@ function AdminActivationMetricsPanel() {
   );
 }
 
+function AdminPaperEditor({
+  paper,
+  universities,
+  saving,
+  onCancel,
+  onSave,
+}: {
+  paper: AdminPaper;
+  universities: University[];
+  saving: boolean;
+  onCancel: () => void;
+  onSave: (values: Omit<AdminPaperUpdateInput, "paperId">, file: File | null) => void;
+}) {
+  const standardLevels = [
+    "100 Level",
+    "200 Level",
+    "300 Level",
+    "400 Level",
+    "500 Level",
+    "Postgraduate",
+  ];
+  const levels = paper.course_level
+    ? [...new Set([paper.course_level, ...standardLevels])]
+    : standardLevels;
+  const semesters = (current: string | null) =>
+    current && !["First Semester", "Second Semester"].includes(current)
+      ? [current, "First Semester", "Second Semester"]
+      : ["First Semester", "Second Semester"];
+
+  return (
+    <form
+      className="admin-form admin-paper-edit"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const values = new FormData(form);
+        const file = values.get("replacement_file");
+        onSave(
+          {
+            university: String(values.get("university") ?? ""),
+            courseCode: String(values.get("course_code") ?? ""),
+            courseTitle: String(values.get("course_title") ?? ""),
+            faculty: String(values.get("faculty") ?? ""),
+            department: String(values.get("department") ?? ""),
+            level: String(values.get("level") ?? ""),
+            courseSemester: String(values.get("course_semester") ?? ""),
+            courseVerified: values.get("course_verified") === "on",
+            academicSession: String(values.get("academic_session") ?? ""),
+            semester: String(values.get("semester") ?? ""),
+            examYear: Number(values.get("exam_year")),
+            paperVerified: values.get("paper_verified") === "on",
+          },
+          file instanceof File && file.size ? file : null,
+        );
+      }}
+    >
+      <div>
+        <h3>Edit past question</h3>
+        <p>Course details are shared: changing them updates every paper linked to this course.</p>
+      </div>
+      <label>
+        <span>University</span>
+        <select name="university" required defaultValue={paper.university}>
+          <option value="" disabled>
+            Select university
+          </option>
+          {!universities.some((university) => university.name === paper.university) && (
+            <option value={paper.university}>{paper.university}</option>
+          )}
+          {universities.map((university) => (
+            <option value={university.name} key={university.id}>
+              {university.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="form-two">
+        <label>
+          <span>Course code</span>
+          <input name="course_code" required maxLength={40} defaultValue={paper.course_code} />
+        </label>
+        <label>
+          <span>Course title</span>
+          <input name="course_title" required maxLength={200} defaultValue={paper.course_title} />
+        </label>
+      </div>
+      <div className="form-two">
+        <label>
+          <span>Faculty</span>
+          <input name="faculty" maxLength={120} defaultValue={paper.course_faculty ?? ""} />
+        </label>
+        <label>
+          <span>Department</span>
+          <input name="department" maxLength={120} defaultValue={paper.course_department ?? ""} />
+        </label>
+      </div>
+      <div className="form-two">
+        <label>
+          <span>Course level</span>
+          <select name="level" defaultValue={paper.course_level ?? ""}>
+            <option value="">Not specified</option>
+            {levels.map((level) => (
+              <option key={level}>{level}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Course semester</span>
+          <select name="course_semester" defaultValue={paper.course_semester ?? ""}>
+            <option value="">Not specified</option>
+            {semesters(paper.course_semester).map((semester) => (
+              <option key={semester}>{semester}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="form-two">
+        <label>
+          <span>Academic session</span>
+          <input
+            name="academic_session"
+            required
+            maxLength={40}
+            defaultValue={paper.academic_session}
+          />
+        </label>
+        <label>
+          <span>Exam year</span>
+          <input
+            name="exam_year"
+            type="number"
+            min="1990"
+            max={new Date().getFullYear() + 1}
+            required
+            defaultValue={paper.exam_year ?? ""}
+          />
+        </label>
+      </div>
+      <label>
+        <span>Paper semester</span>
+        <select name="semester" defaultValue={paper.semester ?? ""}>
+          <option value="">Not specified</option>
+          {semesters(paper.semester).map((semester) => (
+            <option key={semester}>{semester}</option>
+          ))}
+        </select>
+      </label>
+      <label className="upload-area">
+        <input
+          name="replacement_file"
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+        />
+        <b>Replace source file (optional)</b>
+        <small>Leave empty to keep the current file · PDF, JPG, or PNG · Up to 20 MB</small>
+      </label>
+      <div className="admin-paper-verification">
+        <label>
+          <input name="course_verified" type="checkbox" defaultChecked={paper.course_is_verified} />
+          <span>Verified course listing</span>
+        </label>
+        <label>
+          <input name="paper_verified" type="checkbox" defaultChecked={paper.paper_is_verified} />
+          <span>Verified past paper</span>
+        </label>
+      </div>
+      <div className="admin-actions">
+        <Button type="submit" disabled={saving}>
+          {saving ? "Saving changes…" : "Save past question changes"}
+        </Button>
+        <Button type="button" variant="secondary" disabled={saving} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function AdminWorkspace({
   access,
   accessError,
@@ -4689,6 +4872,8 @@ function AdminWorkspace({
   const [contributions, setContributions] = useState<AdminContribution[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [papers, setPapers] = useState<AdminPaper[]>([]);
+  const [editingPaperId, setEditingPaperId] = useState<string | null>(null);
+  const [paperSearch, setPaperSearch] = useState("");
   const [quizPapers, setQuizPapers] = useState<AdminQuizPaper[]>([]);
   const [adminQuizzes, setAdminQuizzes] = useState<AdminQuizSet[]>([]);
   const [students, setStudents] = useState<AdminStudent[]>([]);
@@ -4722,6 +4907,7 @@ function AdminWorkspace({
   const canViewDashboard = Boolean(access?.permissions.includes("dashboard.access"));
   const canViewAnalytics = Boolean(access?.permissions.includes("analytics.view"));
   const canManagePapers = Boolean(access?.permissions.includes("papers.manage"));
+  const canEditAllContent = access?.role === "super_admin";
   const canManageQuizzes = Boolean(
     access?.permissions.includes("quiz.manage") || access?.permissions.includes("quiz.review"),
   );
@@ -5040,6 +5226,70 @@ function AdminWorkspace({
       setBusyId(null);
     }
   };
+
+  const handleAdminPaperUpdate = async (
+    paperId: string,
+    values: Omit<AdminPaperUpdateInput, "paperId">,
+    file: File | null,
+  ) => {
+    const paper = papers.find((item) => item.id === paperId);
+    if (!paper) {
+      setError("This past question is no longer available. Refresh and try again.");
+      return;
+    }
+
+    setBusyId(`paper-edit:${paperId}`);
+    setError(null);
+    setNotice(null);
+    let replacementPath: string | null = null;
+    try {
+      if (file) replacementPath = await uploadAdminPaperReplacement(file);
+      try {
+        await updateAdminPaper({
+          ...values,
+          paperId,
+          replacementFilePath: replacementPath,
+        });
+      } catch (saveError) {
+        let cleanupError: unknown = null;
+        if (replacementPath) {
+          try {
+            await removeAdminPaperFile(replacementPath);
+          } catch (error) {
+            cleanupError = error;
+          }
+        }
+        if (cleanupError) {
+          console.error("Could not remove the unlinked replacement paper.", cleanupError);
+          throw new Error(
+            `${getErrorMessage(saveError, "Could not update this past question.")} The replacement upload could not be removed; contact support to clean up the unused file.`,
+          );
+        }
+        throw saveError;
+      }
+
+      setEditingPaperId(null);
+      setNotice("Past question details saved and recorded in the admin audit log.");
+      try {
+        setPapers(await getAdminPapers());
+      } catch (refreshError) {
+        setError(
+          `Changes were saved, but the paper list could not be refreshed: ${getErrorMessage(refreshError, "reload the page")}`,
+        );
+      }
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, "Could not update this past question."));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const visibleAdminPapers = papers.filter((paper) =>
+    [paper.university, paper.course_code, paper.course_title, paper.academic_session, paper.status]
+      .join(" ")
+      .toLowerCase()
+      .includes(paperSearch.trim().toLowerCase()),
+  );
 
   const refreshAdminQuizzes = async () => {
     setAdminQuizzes(await getAdminQuizSets());
@@ -5407,18 +5657,60 @@ function AdminWorkspace({
                     <span className="eyebrow">Latest content</span>
                     <h2>Recently added papers</h2>
                   </div>
+                  <span>{visibleAdminPapers.length} shown</span>
                 </div>
-                {papers.length ? (
-                  papers.slice(0, 30).map((paper) => (
-                    <article className="admin-contribution" key={paper.id}>
-                      <strong>
-                        {paper.course_code} · {paper.course_title}
-                      </strong>
-                      <small>
-                        {paper.university} · {paper.academic_session} · {paper.status}
-                      </small>
-                    </article>
+                <label className="admin-search">
+                  <span className="sr-only">Search past questions</span>
+                  <input
+                    value={paperSearch}
+                    onChange={(event) => setPaperSearch(event.target.value)}
+                    placeholder="Search university, course, session, or status"
+                  />
+                </label>
+                {visibleAdminPapers.length ? (
+                  visibleAdminPapers.map((paper) => (
+                    <div className="admin-paper-item" key={paper.id}>
+                      <article className="admin-contribution">
+                        <div>
+                          <strong>
+                            {paper.course_code} · {paper.course_title}
+                          </strong>
+                          <small>
+                            {paper.university} · {paper.academic_session} · {paper.status}
+                          </small>
+                        </div>
+                        {canEditAllContent && (
+                          <Button
+                            variant="secondary"
+                            disabled={Boolean(busyId)}
+                            onClick={() =>
+                              setEditingPaperId((current) =>
+                                current === paper.id ? null : paper.id,
+                              )
+                            }
+                          >
+                            {editingPaperId === paper.id ? "Close editor" : "Edit"}
+                          </Button>
+                        )}
+                      </article>
+                      {canEditAllContent && editingPaperId === paper.id && (
+                        <AdminPaperEditor
+                          paper={paper}
+                          universities={universities}
+                          saving={busyId === `paper-edit:${paper.id}`}
+                          onCancel={() => setEditingPaperId(null)}
+                          onSave={(values, file) =>
+                            void handleAdminPaperUpdate(paper.id, values, file)
+                          }
+                        />
+                      )}
+                    </div>
                   ))
+                ) : papers.length ? (
+                  <EmptyState
+                    title="No matching past questions"
+                    text="Try another university, course code, title, session, or status."
+                  />
                 ) : (
                   <EmptyState
                     title="No past papers yet"
@@ -5435,6 +5727,7 @@ function AdminWorkspace({
                 userId={userId}
                 canManage={canCreateQuizzes}
                 canReview={canReviewQuizzes}
+                canEditAll={canEditAllContent}
                 onRefresh={refreshAdminQuizzes}
               />
             )}
@@ -5878,6 +6171,7 @@ function AdminQuizWorkspace({
   userId,
   canManage,
   canReview,
+  canEditAll,
   onRefresh,
 }: {
   quizzes: AdminQuizSet[];
@@ -5886,6 +6180,7 @@ function AdminQuizWorkspace({
   userId: string;
   canManage: boolean;
   canReview: boolean;
+  canEditAll: boolean;
   onRefresh: () => Promise<void>;
 }) {
   type DraftQuestion = {
@@ -6119,6 +6414,7 @@ function AdminQuizWorkspace({
     setError(null);
     try {
       const draftId = createRevision ? await createAdminQuizRevision(quizId) : quizId;
+      if (createRevision && canEditAll) await takeOverAdminQuizDraft(draftId);
       if (createRevision) await onRefresh();
       const draft = await getAdminQuizDraft(draftId);
       setSavedQuizId(draft.id);
@@ -6154,6 +6450,30 @@ function AdminQuizWorkspace({
     } finally {
       setSaving(false);
     }
+  };
+
+  const editQuiz = async (quiz: AdminQuizSet) => {
+    const anotherCreator = quiz.created_by !== userId;
+    if (anotherCreator && canEditAll && ["draft", "needs_revision"].includes(quiz.status)) {
+      setSaving(true);
+      setError(null);
+      setNotice(null);
+      try {
+        await takeOverAdminQuizDraft(quiz.id);
+        await onRefresh();
+        await editDraft(quiz.id);
+      } catch (takeoverError) {
+        setError(
+          takeoverError instanceof Error
+            ? takeoverError.message
+            : "Could not take over this quiz draft.",
+        );
+        setSaving(false);
+      }
+      return;
+    }
+
+    await editDraft(quiz.id, false, quiz.status === "published");
   };
 
   const archiveQuiz = async (quizId: string, quizTitle: string) => {
@@ -6845,14 +7165,14 @@ function AdminQuizWorkspace({
               >
                 {quiz.status.replace("_", " ")}
               </span>
-              {canManage &&
-                quiz.created_by === userId &&
+              {(canManage || canEditAll) &&
+                (quiz.created_by === userId || canEditAll) &&
                 ["draft", "needs_revision"].includes(quiz.status) && (
                   <>
                     <Button
                       variant="secondary"
                       disabled={saving || quiz.id === savedQuizId}
-                      onClick={() => void editDraft(quiz.id)}
+                      onClick={() => void editQuiz(quiz)}
                     >
                       {quiz.replaces_quiz_id ? "Edit revision" : "Edit draft"}
                     </Button>
@@ -6869,23 +7189,19 @@ function AdminQuizWorkspace({
                     </Button>
                   </>
                 )}
-              {canManage &&
-                quiz.created_by === userId &&
+              {(canManage || canEditAll) &&
+                (quiz.created_by === userId || canEditAll) &&
                 quiz.status === "published" &&
                 !quizzes.some(
                   (revision) =>
                     revision.replaces_quiz_id === quiz.id &&
                     ["draft", "needs_revision", "pending_review"].includes(revision.status),
                 ) && (
-                  <Button
-                    variant="secondary"
-                    disabled={saving}
-                    onClick={() => void editDraft(quiz.id, false, true)}
-                  >
+                  <Button variant="secondary" disabled={saving} onClick={() => void editQuiz(quiz)}>
                     Edit quiz
                   </Button>
                 )}
-              {canManage && quiz.created_by === userId && (
+              {(canManage || canEditAll) && (quiz.created_by === userId || canEditAll) && (
                 <Button
                   variant="secondary"
                   disabled={saving}

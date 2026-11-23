@@ -17,9 +17,13 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    department, and year-of-study labels without restricting access; allow paperless
    quizzes; add course-department discovery labels; allow creator self-publishing;
    preserve the current published quiz while a revision is edited; and provide a safe
-   delete action that archives quizzes without removing attempts or battles. These app
-   changes are prepared in the repository, but both migrations must be applied before
-   the live database supports them.
+   delete action that archives quizzes without removing attempts or battles. Then apply
+   `admin-content-editing.sql`. It adds audited Super Admin editing for past-paper and
+   shared course metadata, optional paper-file replacement, quiz revisions across
+   creators, editable-draft takeover, and quiz archival across creators. Course metadata
+   changes apply to all papers linked to that course. These app changes are prepared in
+   the repository, but the migrations must be applied before the live database supports
+   them.
 6. Apply `gamification.sql` after the quiz migrations. Quizzes and battles award 10
    points per correct answer; battles add 25 points for a win or 8 for a draw.
    The migration adds UTC daily streaks, earned badges, and weekly/all-time
@@ -106,6 +110,13 @@ management, university directory creation, audit-log views, and Super Admin-only
 scheduled maintenance controls. While maintenance is active, only active
 Super Admins can use the full website. Everyone else sees the countdown page;
 the database applies the same Super Admin exception to app data access. Team invites activate only after the invited user signs in with the invited, verified email.
+
+Super Admins can edit past-paper metadata and replace its source file from the Past
+Questions admin section. Course metadata is shared by all papers for that course;
+every paper edit and draft takeover is recorded in the admin audit log. Published
+quizzes are edited through a revision so the existing version and its attempts remain
+intact until the revision is published. Pending-review quizzes stay in the reviewer
+workflow rather than being taken over.
 
 Student-submitted academic content remains private until an administrator reviews
 and approves it. A quiz can be created without a source paper; when a paper is

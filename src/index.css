@@ -5405,6 +5405,43 @@ select {
   background: #fff;
 }
 
+.admin-paper-item {
+  margin-bottom: 12px;
+}
+
+.admin-paper-edit {
+  margin-top: 10px;
+}
+
+.admin-paper-edit > div:first-child h3,
+.admin-paper-edit > div:first-child p {
+  margin: 0;
+}
+
+.admin-paper-edit > div:first-child p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-paper-verification {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.admin-form .admin-paper-verification label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-form .admin-paper-verification input[type="checkbox"] {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--purple);
+}
+
 .admin-form label,
 .admin-invite-form label,
 .admin-inline-form label {
@@ -5547,6 +5584,14 @@ select {
 
 .admin-search {
   max-width: 520px;
+}
+
+.admin-search input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #d6d1cc;
+  border-radius: 9px;
 }
 
 .admin-section-heading {

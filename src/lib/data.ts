@@ -363,12 +363,35 @@ export interface AdminPaper {
   university: string;
   course_code: string;
   course_title: string;
+  course_faculty: string | null;
+  course_department: string | null;
+  course_level: string | null;
+  course_semester: string | null;
   academic_session: string;
   semester: string | null;
   exam_year: number | null;
   file_path: string;
+  paper_is_verified: boolean;
+  course_is_verified: boolean;
   status: string;
   created_at: string;
+}
+
+export interface AdminPaperUpdateInput {
+  paperId: string;
+  university: string;
+  courseCode: string;
+  courseTitle: string;
+  faculty: string;
+  department: string;
+  level: string;
+  courseSemester: string;
+  courseVerified: boolean;
+  academicSession: string;
+  semester: string;
+  examYear: number;
+  paperVerified: boolean;
+  replacementFilePath?: string | null;
 }
 
 export interface MaintenanceStatus {
@@ -686,6 +709,13 @@ export async function createAdminQuizRevision(quizId: string) {
     throw error;
   }
   return data as string;
+}
+
+export async function takeOverAdminQuizDraft(quizId: string) {
+  const { error } = await requireSupabase().rpc("admin_take_over_quiz_draft", {
+    p_quiz_id: quizId,
+  });
+  if (error) throw error;
 }
 
 export async function publishAdminQuiz(quizId: string) {
@@ -1417,9 +1447,56 @@ export async function setAdminStudentSuspension(userId: string, suspended: boole
 }
 
 export async function getAdminPapers() {
-  const { data, error } = await requireSupabase().rpc("admin_list_papers");
+  const { data, error } = await requireSupabase().rpc("admin_list_editable_papers");
   if (error) throw error;
   return (data ?? []) as AdminPaper[];
+}
+
+export async function updateAdminPaper(input: AdminPaperUpdateInput) {
+  const { error } = await requireSupabase().rpc("admin_update_paper", {
+    p_paper_id: input.paperId,
+    p_university: input.university,
+    p_course_code: input.courseCode,
+    p_course_title: input.courseTitle,
+    p_faculty: input.faculty || null,
+    p_department: input.department || null,
+    p_level: input.level || null,
+    p_course_semester: input.courseSemester || null,
+    p_course_verified: input.courseVerified,
+    p_academic_session: input.academicSession,
+    p_semester: input.semester || null,
+    p_exam_year: input.examYear,
+    p_paper_verified: input.paperVerified,
+    p_replacement_file_path: input.replacementFilePath || null,
+  });
+  if (error) throw error;
+}
+
+export async function uploadAdminPaperReplacement(file: File) {
+  if (
+    file.size > 20 * 1024 * 1024 ||
+    !["application/pdf", "image/jpeg", "image/png"].includes(file.type)
+  ) {
+    throw new Error("Choose a PDF, JPG, or PNG file up to 20 MB.");
+  }
+  const client = requireSupabase();
+  const { data: userData, error: userError } = await client.auth.getUser();
+  if (userError) throw userError;
+  if (!userData.user) throw new Error("Sign in again before replacing a past paper.");
+
+  const safeName = file.name.replace(/[\\/]/g, "_");
+  const filePath = `${userData.user.id}/admin/${crypto.randomUUID()}-${safeName}`;
+  const { error } = await client.storage.from("contributions").upload(filePath, file, {
+    contentType: file.type,
+    upsert: false,
+  });
+  if (error) throw error;
+  return filePath;
+}
+
+export async function removeAdminPaperFile(filePath: string) {
+  const { error } = await requireSupabase().storage.from("contributions").remove([filePath]);
+  if (error) throw error;
 }
 
 export async function publishAdminPaper(
