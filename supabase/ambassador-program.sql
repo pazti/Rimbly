@@ -76,7 +76,7 @@ begin
 
   if not found then
     loop
-      generated_code := upper(encode(gen_random_bytes(5), 'hex'));
+      generated_code := upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 10));
       begin
         insert into public.ambassador_profiles (user_id, invite_code, terms_version)
         values (auth.uid(), generated_code, p_terms_version)
@@ -175,6 +175,20 @@ drop trigger if exists capture_ambassador_signup on auth.users;
 create trigger capture_ambassador_signup
 after insert on auth.users
 for each row execute function public.capture_ambassador_signup();
+
+insert into public.ambassador_referrals (
+  referred_user_id, ambassador_user_id, invite_code, signed_up_at
+)
+select account.id, ambassador.user_id, ambassador.invite_code, account.created_at
+from auth.users account
+join public.ambassador_profiles ambassador
+  on ambassador.invite_code = upper(trim(coalesce(
+    account.raw_user_meta_data ->> 'rimbly_referral_code', ''
+  )))
+where ambassador.status = 'active'
+  and ambassador.user_id <> account.id
+  and account.created_at >= ambassador.agreed_at
+on conflict (referred_user_id) do nothing;
 
 create or replace function public.reward_ambassador_on_activation()
 returns trigger

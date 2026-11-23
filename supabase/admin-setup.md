@@ -38,7 +38,10 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    agreement-gated ambassador flow, unique invite codes, signup attribution, ₦250
    rewards after a referred student completes their first reviewed quiz, dashboard
    totals, and Super Admin pause/remove controls. It relies on activation events and
-   must be applied after activation measurement is installed.
+   must be applied after activation measurement is installed. Rerunning this
+   migration safely replaces its RPCs and backfills referrals from signup metadata
+   for existing accounts that were created after an ambassador agreed to the terms.
+   Referral attribution is stored in `ambassador_referrals`, not on `profiles`.
 7. Apply `monetization.sql` after `gamification.sql`. It adds server-managed
    Rimbly Pro subscriptions and payment records, a Pro flair on leaderboards,
    five free quiz submissions and three free battle invites per UTC day, and
