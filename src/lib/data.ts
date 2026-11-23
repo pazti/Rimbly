@@ -394,6 +394,21 @@ export interface AdminPaperUpdateInput {
   replacementFilePath?: string | null;
 }
 
+export interface AmbassadorDashboard {
+  invite_code: string;
+  status: "active" | "paused" | "removed";
+  agreed_at: string;
+  total_signups: number;
+  total_activated: number;
+  total_earned: number;
+}
+
+export interface AdminAmbassador extends AmbassadorDashboard {
+  user_id: string;
+  full_name: string;
+  email: string;
+}
+
 export interface MaintenanceStatus {
   active: boolean;
   title: string;
@@ -1335,6 +1350,39 @@ export async function getAdminActivationMetrics() {
 export async function recordReviewedQuizActivation(attemptId: string) {
   const { error } = await requireSupabase().rpc("record_reviewed_quiz_activation", {
     p_attempt_id: attemptId,
+  });
+  if (error) throw error;
+}
+
+export async function getAmbassadorDashboard() {
+  const { data, error } = await requireSupabase().rpc("get_ambassador_dashboard");
+  if (error) throw error;
+  return ((data ?? [])[0] ?? null) as AmbassadorDashboard | null;
+}
+
+export async function agreeToAmbassadorTerms() {
+  const { data, error } = await requireSupabase().rpc("become_ambassador", {
+    p_terms_version: "2026-11-v1",
+  });
+  if (error) throw error;
+  const dashboard = (data ?? [])[0] as AmbassadorDashboard | undefined;
+  if (!dashboard?.invite_code) throw new Error("Ambassador setup returned no invite code.");
+  return dashboard;
+}
+
+export async function getAdminAmbassadors() {
+  const { data, error } = await requireSupabase().rpc("admin_list_ambassadors");
+  if (error) throw error;
+  return (data ?? []) as AdminAmbassador[];
+}
+
+export async function setAdminAmbassadorStatus(
+  userId: string,
+  status: "active" | "paused" | "removed",
+) {
+  const { error } = await requireSupabase().rpc("admin_set_ambassador_status", {
+    p_user_id: userId,
+    p_status: status,
   });
   if (error) throw error;
 }

@@ -14,6 +14,8 @@ import {
   AdminOverview,
   AdminStudent,
   AdminTeamMember,
+  AdminAmbassador,
+  AmbassadorDashboard,
   MaintenanceStatus,
   RimblyBillingStatus,
   QuizAttemptReviewItem,
@@ -53,6 +55,10 @@ import {
   getAdminOverview,
   removeAdminPaperFile,
   recordReviewedQuizActivation,
+  getAmbassadorDashboard,
+  agreeToAmbassadorTerms,
+  getAdminAmbassadors,
+  setAdminAmbassadorStatus,
   getMaintenanceStatus,
   deleteAdminPaper,
   takeOverAdminQuizDraft,
@@ -123,6 +129,7 @@ type Route =
   | "quiz-history"
   | "battle"
   | "leaderboard"
+  | "ambassador"
   | "profile"
   | "subscription"
   | "contribute"
@@ -155,6 +162,7 @@ const routes: Route[] = [
   "quiz-history",
   "battle",
   "leaderboard",
+  "ambassador",
   "profile",
   "subscription",
   "contribute",
@@ -172,6 +180,17 @@ const routeFromLocation = (): Route => {
 };
 
 const pendingBattleInviteStorageKey = "rimbly-pending-battle-invite";
+const pendingReferralCodeStorageKey = "rimbly-pending-referral-code";
+const postSignupRouteStorageKey = "rimbly-post-signup-route";
+
+const pendingReferralCodeFromLocation = () => {
+  const referralCode = new URLSearchParams(window.location.search).get("ref")?.trim().toUpperCase();
+  if (referralCode && /^[A-F0-9]{10}$/.test(referralCode)) {
+    window.sessionStorage.setItem(pendingReferralCodeStorageKey, referralCode);
+    return referralCode;
+  }
+  return window.sessionStorage.getItem(pendingReferralCodeStorageKey);
+};
 
 const routeUrl = (route: Route) => {
   const search = new URLSearchParams({ route });
@@ -734,12 +753,14 @@ function AppShell({
   route,
   title,
   adminAvailable,
+  ambassadorAvailable,
   onNavigate,
   children,
 }: {
   route: Route;
   title: string;
   adminAvailable: boolean;
+  ambassadorAvailable: boolean;
   onNavigate: (route: Route) => void;
   children: ReactNode;
 }) {
@@ -759,6 +780,16 @@ function AppShell({
               {item.label}
             </button>
           ))}
+          {ambassadorAvailable && (
+            <button
+              className={route === "ambassador" ? "active" : ""}
+              aria-current={route === "ambassador" ? "page" : undefined}
+              onClick={() => onNavigate("ambassador")}
+            >
+              <Icon>★</Icon>
+              Ambassador
+            </button>
+          )}
           {adminAvailable && (
             <button
               className={route === "admin" ? "active" : ""}
@@ -2252,6 +2283,7 @@ function readCachedMaintenanceStatus(): MaintenanceStatus | null {
 function App() {
   const [route, setRoute] = useState<Route>(routeFromLocation);
   const [pendingBattleId, setPendingBattleId] = useState(pendingBattleInviteFromLocation);
+  const [pendingReferralCode, setPendingReferralCode] = useState(pendingReferralCodeFromLocation);
   const [verificationEmail, setVerificationEmail] = useState(
     () => window.sessionStorage.getItem("rimbly-verification-email") ?? "",
   );
@@ -2270,6 +2302,11 @@ function App() {
   const [adminAccess, setAdminAccess] = useState<AdminAccess | null>(null);
   const [adminAccessLoaded, setAdminAccessLoaded] = useState(false);
   const [adminAccessError, setAdminAccessError] = useState<string | null>(null);
+  const [ambassadorDashboard, setAmbassadorDashboard] = useState<AmbassadorDashboard | null>(null);
+  const [ambassadorLoading, setAmbassadorLoading] = useState(false);
+  const [ambassadorError, setAmbassadorError] = useState<string | null>(null);
+  const [ambassadorBusy, setAmbassadorBusy] = useState(false);
+  const [ambassadorRetry, setAmbassadorRetry] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(supabaseConfigurationError);
   const [notice, setNotice] = useState<string | null>(null);
@@ -2349,6 +2386,21 @@ function App() {
     setNotice(null);
     window.history.pushState({ route: next }, "", routeUrl(next));
     setRoute(next);
+  };
+
+  const startAmbassadorFlow = () => {
+    if (user) {
+      if (!profile) window.sessionStorage.setItem(postSignupRouteStorageKey, "ambassador");
+      navigate("ambassador");
+      return;
+    }
+    window.sessionStorage.setItem(postSignupRouteStorageKey, "ambassador");
+    navigate("signup");
+  };
+
+  const startAmbassadorSignIn = () => {
+    window.sessionStorage.setItem(postSignupRouteStorageKey, "ambassador");
+    navigate("login");
   };
 
   const dismissHomeGuide = () => {
@@ -2547,6 +2599,12 @@ function App() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (user && route === "ambassador" && !profile) {
+      window.sessionStorage.setItem(postSignupRouteStorageKey, "ambassador");
+    }
+  }, [profile, route, user?.id]);
+
+  useEffect(() => {
     if (!authReady) return;
     const publicRoutes: Route[] = [
       "welcome",
@@ -2556,8 +2614,14 @@ function App() {
       "forgot-password",
       "verify-email",
       "reset-password",
+      "ambassador",
     ];
-    if (user && publicRoutes.includes(route) && route !== "reset-password")
+    if (
+      user &&
+      publicRoutes.includes(route) &&
+      route !== "reset-password" &&
+      route !== "ambassador"
+    )
       navigate(
         pendingBattleId ? (profile ? "battle" : "onboarding") : profile ? "home" : "onboarding",
       );
@@ -2919,6 +2983,30 @@ function App() {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!user || route !== "ambassador") return;
+    let active = true;
+    setAmbassadorLoading(true);
+    setAmbassadorError(null);
+    void getAmbassadorDashboard()
+      .then((dashboard) => {
+        if (active) setAmbassadorDashboard(dashboard);
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setAmbassadorError(
+            loadError instanceof Error ? loadError.message : "Could not load ambassador details.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setAmbassadorLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [ambassadorRetry, route, user?.id]);
+
   const refreshActivity = async () => {
     if (!user) return;
     const [nextAttempts, nextLeaders, nextNotifications, nextContributions, nextGameProgress] =
@@ -2960,9 +3048,12 @@ function App() {
           password,
           options: {
             emailRedirectTo: routeUrl("onboarding"),
+            data: pendingReferralCode ? { rimbly_referral_code: pendingReferralCode } : undefined,
           },
         });
         if (authError) throw authError;
+        window.sessionStorage.removeItem(pendingReferralCodeStorageKey);
+        setPendingReferralCode(null);
         if (!data.session) {
           window.sessionStorage.setItem("rimbly-verification-email", email);
           setVerificationEmail(email);
@@ -2977,7 +3068,12 @@ function App() {
         if (authError) throw authError;
         window.sessionStorage.removeItem("rimbly-verification-email");
         setVerificationEmail("");
-        navigate(pendingBattleId ? "battle" : "home");
+        const postSignupRoute =
+          window.sessionStorage.getItem(postSignupRouteStorageKey) === "ambassador"
+            ? "ambassador"
+            : null;
+        window.sessionStorage.removeItem(postSignupRouteStorageKey);
+        navigate(postSignupRoute ?? (pendingBattleId ? "battle" : "home"));
       }
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "Authentication failed.");
@@ -3068,11 +3164,40 @@ function App() {
       });
       setProfile(saved);
       setNotice("Your profile was saved.");
-      navigate(route === "onboarding" ? (pendingBattleId ? "battle" : "home") : "profile");
+      const postSignupRoute =
+        window.sessionStorage.getItem(postSignupRouteStorageKey) === "ambassador"
+          ? "ambassador"
+          : null;
+      window.sessionStorage.removeItem(postSignupRouteStorageKey);
+      navigate(
+        route === "onboarding"
+          ? (postSignupRoute ?? (pendingBattleId ? "battle" : "home"))
+          : "profile",
+      );
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save your profile.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleAgreeToAmbassadorTerms = async () => {
+    if (!user) {
+      startAmbassadorFlow();
+      return;
+    }
+    setAmbassadorBusy(true);
+    setAmbassadorError(null);
+    try {
+      setAmbassadorDashboard(await agreeToAmbassadorTerms());
+    } catch (agreementError) {
+      setAmbassadorError(
+        agreementError instanceof Error
+          ? agreementError.message
+          : "Could not create your ambassador invite link.",
+      );
+    } finally {
+      setAmbassadorBusy(false);
     }
   };
 
@@ -3488,6 +3613,22 @@ function App() {
     return <GuestExplorePage configured={Boolean(supabase)} onNavigate={navigate} />;
   }
 
+  if (route === "ambassador" && !user) {
+    return (
+      <AmbassadorPage
+        signedIn={false}
+        dashboard={null}
+        loading={false}
+        error={null}
+        busy={false}
+        onAgree={() => startAmbassadorFlow()}
+        onRetry={() => {}}
+        onSignIn={startAmbassadorSignIn}
+        onNavigate={navigate}
+      />
+    );
+  }
+
   if (route === "welcome" || route === "signup" || route === "login") {
     if (route === "welcome") {
       return (
@@ -3562,6 +3703,13 @@ function App() {
               onClick={() => navigate("explore")}
             >
               Explore courses without an account →
+            </button>
+            <button
+              className="guest-explore-link"
+              type="button"
+              onClick={() => navigate("ambassador")}
+            >
+              Ambassador program →
             </button>
             <small>Reviewed quizzes · University-focused courses · Score and answer review</small>
           </section>
@@ -3772,6 +3920,23 @@ function App() {
             }
             onPlans={() => navigate("subscription")}
           />
+          {ambassadorDashboard?.status !== "removed" && (
+            <section className="ambassador-home-prompt">
+              <div>
+                <span className="eyebrow">
+                  {ambassadorDashboard ? "Grow with Rimbly" : "Student ambassador program"}
+                </span>
+                <strong>
+                  {ambassadorDashboard
+                    ? "Your invite link is ready."
+                    : "Invite students. Earn ₦250 for each first quiz."}
+                </strong>
+              </div>
+              <Button variant="secondary" onClick={() => navigate("ambassador")}>
+                {ambassadorDashboard ? "View ambassador dashboard" : "Become an ambassador"}
+              </Button>
+            </section>
+          )}
           <details className="home-progress-details home-community-details">
             <summary>
               <span>
@@ -4093,6 +4258,7 @@ function App() {
           onRetry={() => void handleStartQuiz(lastAttempt.quiz_id ?? activeQuizSetId ?? undefined)}
           onBrowse={() => navigate("quiz-setup")}
           onHistory={() => navigate("quiz-history")}
+          onAmbassador={startAmbassadorFlow}
         />
       ) : (
         <EmptyState
@@ -4274,6 +4440,21 @@ function App() {
             error={gameProgressError}
             isPro={Boolean(billingStatus?.is_pro)}
           />
+          {ambassadorDashboard?.status !== "removed" && (
+            <button className="ambassador-profile-link" onClick={() => navigate("ambassador")}>
+              <span>
+                <strong>
+                  {ambassadorDashboard ? "Ambassador dashboard" : "Become a Rimbly Ambassador"}
+                </strong>
+                <small>
+                  {ambassadorDashboard
+                    ? "Share your link and track your rewards"
+                    : "Earn ₦250 for every new student who completes their first quiz"}
+                </small>
+              </span>
+              <span aria-hidden="true">→</span>
+            </button>
+          )}
           <form
             className="form-stack profile-edit"
             onSubmit={(event) => void handleSaveProfile(event)}
@@ -4491,6 +4672,22 @@ function App() {
         </>
       );
       break;
+    case "ambassador":
+      title = "Ambassador";
+      content = (
+        <AmbassadorPage
+          signedIn
+          dashboard={ambassadorDashboard}
+          loading={ambassadorLoading}
+          error={ambassadorError}
+          busy={ambassadorBusy}
+          onAgree={() => void handleAgreeToAmbassadorTerms()}
+          onRetry={() => setAmbassadorRetry((retry) => retry + 1)}
+          onSignIn={() => navigate("login")}
+          onNavigate={navigate}
+        />
+      );
+      break;
     case "subscription":
       title = "Rimbly Pro";
       content = (
@@ -4617,6 +4814,9 @@ function App() {
         route={route}
         title={title}
         adminAvailable={Boolean(adminAccess?.permissions.includes("dashboard.access"))}
+        ambassadorAvailable={
+          ambassadorDashboard !== null && ambassadorDashboard.status !== "removed"
+        }
         onNavigate={navigate}
       >
         {content}
@@ -4630,6 +4830,270 @@ function App() {
         />
       )}
     </>
+  );
+}
+
+function AmbassadorPage({
+  signedIn,
+  dashboard,
+  loading,
+  error,
+  busy,
+  onAgree,
+  onRetry,
+  onSignIn,
+  onNavigate,
+}: {
+  signedIn: boolean;
+  dashboard: AmbassadorDashboard | null;
+  loading: boolean;
+  error: string | null;
+  busy: boolean;
+  onAgree: () => void;
+  onRetry: () => void;
+  onSignIn: () => void;
+  onNavigate: (route: Route) => void;
+}) {
+  const [accepted, setAccepted] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"link" | "code" | null>(null);
+  const inviteUrl = dashboard
+    ? `${window.location.origin}/?route=signup&ref=${encodeURIComponent(dashboard.invite_code)}`
+    : "";
+  const shareText = `Join me on Rimbly for university-focused past questions and reviewed quizzes: ${inviteUrl}`;
+
+  const copyText = async (value: string, copiedItem: "link" | "code") => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(copiedItem);
+      setCopyError(null);
+      window.setTimeout(() => setCopied(null), 2000);
+    } catch (copyFailure) {
+      setCopyError(
+        `${getErrorMessage(copyFailure, "Clipboard access is unavailable.")} Select and copy the ${copiedItem} manually.`,
+      );
+    }
+  };
+
+  const terms = [
+    "Refer real students who are new to Rimbly.",
+    "No fake, duplicate, or self-referrals.",
+    "Rimbly may pause or change the program.",
+    "Fraudulent referrals mean removal and no reward.",
+  ];
+
+  return (
+    <div className="ambassador-page">
+      <header className="ambassador-page-header">
+        <button className="logo" onClick={() => onNavigate(signedIn ? "home" : "welcome")}>
+          <span className="logo-mark" aria-hidden="true">
+            <img src="/rimbly-icon.png" alt="" />
+          </span>
+          <span>Rimbly</span>
+        </button>
+        {!signedIn && (
+          <button className="ambassador-signin" onClick={onSignIn}>
+            Already a student? Sign in
+          </button>
+        )}
+      </header>
+
+      <main>
+        <section className="ambassador-hero">
+          <span className="eyebrow">Rimbly Student Ambassador Program</span>
+          <h1>Invite students. Earn ₦250 for every first quiz.</h1>
+          <p>
+            Earn ₦250 for every new student who joins with your link and completes their first
+            reviewed quiz. Empty accounts don’t earn a reward.
+          </p>
+          <div className="ambassador-reward-highlight">
+            <strong>₦250</strong>
+            <span>per activated student</span>
+            <small>Activated = signed up and completed at least one reviewed quiz.</small>
+          </div>
+          {loading ? (
+            <p className="field-note" role="status">
+              Checking your ambassador status…
+            </p>
+          ) : dashboard?.status === "active" ? (
+            <a className="btn btn-primary ambassador-dashboard-jump" href="#ambassador-dashboard">
+              Open your invite dashboard ↓
+            </a>
+          ) : signedIn && dashboard?.status === "paused" ? (
+            <p className="ambassador-status-message" role="status">
+              Your ambassador account is paused. Your existing referral history is safe, but your
+              invite link can’t bring in new referrals right now.
+            </p>
+          ) : signedIn && dashboard?.status === "removed" ? (
+            <p className="ambassador-status-message removed" role="status">
+              Your ambassador access has been removed. Contact Rimbly support if you think this was
+              a mistake.
+            </p>
+          ) : signedIn && dashboard ? (
+            <p className="ambassador-status-message" role="status">
+              Your invite link is inactive while the program is paused.
+            </p>
+          ) : signedIn && error ? (
+            <div className="ambassador-consent">
+              <p className="app-feedback" role="alert">
+                {error}
+              </p>
+              <Button variant="secondary" onClick={onRetry}>
+                Try again
+              </Button>
+            </div>
+          ) : signedIn ? (
+            <div className="ambassador-consent">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={accepted}
+                  onChange={(event) => setAccepted(event.target.checked)}
+                />
+                <span>I agree to the Ambassador rules above.</span>
+              </label>
+              <Button disabled={!accepted || busy} onClick={onAgree}>
+                {busy ? "Creating your invite link…" : "Agree & Get My Invite Link"}
+              </Button>
+              {error && (
+                <p className="app-feedback" role="alert">
+                  {error}
+                </p>
+              )}
+            </div>
+          ) : (
+            <Button onClick={onAgree}>Start application</Button>
+          )}
+        </section>
+
+        {dashboard?.status === "active" && (
+          <section className="ambassador-dashboard" id="ambassador-dashboard">
+            <div className="section-title">
+              <div>
+                <span>Welcome to the program</span>
+                <h2>Your ambassador dashboard</h2>
+              </div>
+              <span className="badge badge-green">Active</span>
+            </div>
+            <div className="ambassador-invite-card">
+              <div>
+                <span className="eyebrow">Your invite code</span>
+                <strong className="ambassador-code">{dashboard.invite_code}</strong>
+              </div>
+              <label>
+                <span>Your unique invite link</span>
+                <input aria-label="Your unique invite link" readOnly value={inviteUrl} />
+              </label>
+              <div className="ambassador-share-actions">
+                <Button variant="secondary" onClick={() => void copyText(inviteUrl, "link")}>
+                  {copied === "link" ? "Link copied ✓" : "Copy invite link"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void copyText(dashboard.invite_code, "code")}
+                >
+                  {copied === "code" ? "Code copied ✓" : "Copy code"}
+                </Button>
+                <a
+                  className="btn btn-secondary"
+                  href={`https://wa.me/?text=${encodeURIComponent(shareText)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Share on WhatsApp
+                </a>
+                <a
+                  className="btn btn-secondary"
+                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Share on X
+                </a>
+              </div>
+              {copyError && (
+                <p className="app-feedback" role="alert">
+                  {copyError}
+                </p>
+              )}
+              <small>
+                Earn only after a new student signs up with this link and completes their first
+                reviewed quiz.
+              </small>
+            </div>
+            <div className="ambassador-stats">
+              <article>
+                <strong>{dashboard.total_signups.toLocaleString()}</strong>
+                <span>Signups</span>
+              </article>
+              <article>
+                <strong>{dashboard.total_activated.toLocaleString()}</strong>
+                <span>Activated students</span>
+              </article>
+              <article>
+                <strong>₦{dashboard.total_earned.toLocaleString()}</strong>
+                <span>Earned</span>
+              </article>
+            </div>
+            <p className="ambassador-payout-note">
+              Earnings show confirmed ₦250 rewards. Payment arrangements will be communicated by
+              Rimbly; no payment is issued for an empty account.
+            </p>
+          </section>
+        )}
+
+        <section className="ambassador-how">
+          <div className="section-title">
+            <div>
+              <span>Simple and transparent</span>
+              <h2>How it works</h2>
+            </div>
+          </div>
+          <div className="ambassador-steps">
+            {[
+              [
+                "01",
+                "Get your invite link",
+                "Agree to the rules and get your unique link and code.",
+              ],
+              [
+                "02",
+                "Share with students",
+                "Send it to course mates and students at your university.",
+              ],
+              [
+                "03",
+                "Earn ₦250",
+                "Get credited when a new student completes their first reviewed quiz.",
+              ],
+            ].map(([number, title, description]) => (
+              <article key={number}>
+                <span>{number}</span>
+                <strong>{title}</strong>
+                <p>{description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="ambassador-rules">
+          <div>
+            <span className="eyebrow">Clear rules</span>
+            <h2>Built on trust.</h2>
+            <p>Only genuine new students and completed first quizzes count.</p>
+          </div>
+          <ul>
+            {terms.map((term) => (
+              <li key={term}>{term}</li>
+            ))}
+          </ul>
+        </section>
+      </main>
+      <footer className="ambassador-footer">
+        <button onClick={() => onNavigate(signedIn ? "home" : "welcome")}>← Back to Rimbly</button>
+        {!signedIn && <button onClick={onSignIn}>Sign in to your account</button>}
+      </footer>
+    </div>
   );
 }
 
@@ -4930,6 +5394,7 @@ function AdminWorkspace({
     | "quizzes"
     | "students"
     | "team"
+    | "ambassadors"
     | "academics"
     | "maintenance"
     | "audit"
@@ -4944,6 +5409,9 @@ function AdminWorkspace({
   const [adminQuizzes, setAdminQuizzes] = useState<AdminQuizSet[]>([]);
   const [students, setStudents] = useState<AdminStudent[]>([]);
   const [team, setTeam] = useState<AdminTeamMember[]>([]);
+  const [ambassadors, setAmbassadors] = useState<AdminAmbassador[]>([]);
+  const [ambassadorsLoading, setAmbassadorsLoading] = useState(false);
+  const [ambassadorsError, setAmbassadorsError] = useState<string | null>(null);
   const [adminUniversities, setAdminUniversities] = useState<
     Array<{ id: string; name: string; is_active?: boolean }>
   >([]);
@@ -4983,6 +5451,7 @@ function AdminWorkspace({
   const canManageTeam = Boolean(access?.permissions.includes("team.manage"));
   const canManageAcademics = Boolean(access?.permissions.includes("academics.manage"));
   const canManageMaintenance = access?.role === "super_admin";
+  const canManageAmbassadors = access?.role === "super_admin";
 
   useEffect(() => {
     setMaintenanceEnabled(maintenanceStatus?.active ?? false);
@@ -5107,6 +5576,30 @@ function AdminWorkspace({
       active = false;
     };
   }, [access, canManageTeam, section]);
+
+  useEffect(() => {
+    if (!access || section !== "ambassadors" || !canManageAmbassadors) return;
+    let active = true;
+    setAmbassadorsLoading(true);
+    setAmbassadorsError(null);
+    void getAdminAmbassadors()
+      .then((result) => {
+        if (active) setAmbassadors(result);
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setAmbassadorsError(
+            loadError instanceof Error ? loadError.message : "Could not load ambassadors.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setAmbassadorsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [access, canManageAmbassadors, section]);
 
   useEffect(() => {
     if (!access || section !== "academics" || !canManageAcademics) return;
@@ -5415,6 +5908,30 @@ function AdminWorkspace({
     }
   };
 
+  const handleAmbassadorStatus = async (
+    ambassador: AdminAmbassador,
+    status: "active" | "paused" | "removed",
+  ) => {
+    const confirmed =
+      status !== "removed" ||
+      window.confirm(`Remove ambassador access for ${ambassador.full_name}?`);
+    if (!confirmed) return;
+    setBusyId(`ambassador:${ambassador.user_id}`);
+    setAmbassadorsError(null);
+    setNotice(null);
+    try {
+      await setAdminAmbassadorStatus(ambassador.user_id, status);
+      setAmbassadors(await getAdminAmbassadors());
+      setNotice(`Ambassador status updated to ${status}.`);
+    } catch (statusError) {
+      setAmbassadorsError(
+        statusError instanceof Error ? statusError.message : "Could not update ambassador status.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const adminNav: { key: typeof section; label: string; visible: boolean }[] = [
     { key: "overview", label: "Overview", visible: canViewDashboard },
     { key: "contributions", label: "Review queue", visible: canReview },
@@ -5422,6 +5939,7 @@ function AdminWorkspace({
     { key: "quizzes", label: "Quiz authoring", visible: canManageQuizzes },
     { key: "students", label: "Students", visible: canManageStudents },
     { key: "team", label: "Team", visible: canManageTeam },
+    { key: "ambassadors", label: "Ambassadors", visible: canManageAmbassadors },
     { key: "academics", label: "Academics", visible: canManageAcademics },
     { key: "maintenance", label: "Maintenance", visible: canManageMaintenance },
     { key: "audit", label: "Audit logs", visible: canViewAudit },
@@ -6007,6 +6525,86 @@ function AdminWorkspace({
                     );
                   })}
                 </div>
+              </section>
+            )}
+            {section === "ambassadors" && canManageAmbassadors && (
+              <section className="admin-review-list">
+                <div className="admin-section-heading">
+                  <div>
+                    <span className="eyebrow">Student referral program</span>
+                    <h2>Ambassadors</h2>
+                  </div>
+                  <span>{ambassadors.length} ambassadors</span>
+                </div>
+                {ambassadorsError && (
+                  <p className="app-feedback" role="alert">
+                    {ambassadorsError}
+                  </p>
+                )}
+                {ambassadorsLoading ? (
+                  <p className="field-note" role="status">
+                    Loading ambassador accounts…
+                  </p>
+                ) : ambassadors.length ? (
+                  ambassadors.map((ambassador) => (
+                    <article
+                      className="admin-contribution admin-ambassador-row"
+                      key={ambassador.user_id}
+                    >
+                      <div>
+                        <strong>{ambassador.full_name}</strong>
+                        <small>
+                          {ambassador.email} · {ambassador.invite_code} · Joined program{" "}
+                          {new Date(ambassador.agreed_at).toLocaleDateString()}
+                        </small>
+                        <small>
+                          {ambassador.total_signups} signups · {ambassador.total_activated}{" "}
+                          activated
+                          {" · "}₦{ambassador.total_earned.toLocaleString()} earned
+                        </small>
+                      </div>
+                      <span
+                        className={`badge ${ambassador.status === "active" ? "badge-green" : "badge-amber"}`}
+                      >
+                        {ambassador.status}
+                      </span>
+                      <div className="admin-actions">
+                        {ambassador.status !== "active" && (
+                          <Button
+                            variant="secondary"
+                            disabled={Boolean(busyId)}
+                            onClick={() => void handleAmbassadorStatus(ambassador, "active")}
+                          >
+                            Restore
+                          </Button>
+                        )}
+                        {ambassador.status === "active" && (
+                          <Button
+                            variant="secondary"
+                            disabled={Boolean(busyId)}
+                            onClick={() => void handleAmbassadorStatus(ambassador, "paused")}
+                          >
+                            Pause
+                          </Button>
+                        )}
+                        {ambassador.status !== "removed" && (
+                          <Button
+                            variant="secondary"
+                            disabled={Boolean(busyId)}
+                            onClick={() => void handleAmbassadorStatus(ambassador, "removed")}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <EmptyState
+                    title="No ambassadors yet"
+                    text="Students who agree to the program rules will appear here."
+                  />
+                )}
               </section>
             )}
             {section === "academics" && (
@@ -8694,6 +9292,7 @@ function ResultsPage({
   onRetry,
   onBrowse,
   onHistory,
+  onAmbassador,
 }: {
   attempt: QuizAttempt;
   paper?: Paper;
@@ -8703,6 +9302,7 @@ function ResultsPage({
   onRetry: () => void;
   onBrowse: () => void;
   onHistory: () => void;
+  onAmbassador: () => void;
 }) {
   const nextStep =
     attempt.score_percent >= 80
@@ -8772,6 +9372,15 @@ function ResultsPage({
       <section className="quiz-next-step">
         <span className="eyebrow">Your next step</span>
         <p>{nextStep}</p>
+      </section>
+      <section className="quiz-ambassador-prompt">
+        <div>
+          <span className="eyebrow">Help your course mates</span>
+          <h2>Earn ₦250 when a new student completes their first quiz.</h2>
+        </div>
+        <Button variant="secondary" onClick={onAmbassador}>
+          Explore the Ambassador Program
+        </Button>
       </section>
       <section className="quiz-review">
         <div className="section-title">

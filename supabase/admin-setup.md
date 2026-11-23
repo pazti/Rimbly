@@ -34,7 +34,11 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    Activation is recorded after the score is saved and its answer review loads. It
    tracks only accounts created after the migration, stores an internal account ID
    and timing but no names or answers, and exposes aggregate metrics to administrators
-   with `analytics.view`.
+   with `analytics.view`. Then apply `ambassador-program.sql`. It adds an
+   agreement-gated ambassador flow, unique invite codes, signup attribution, ₦250
+   rewards after a referred student completes their first reviewed quiz, dashboard
+   totals, and Super Admin pause/remove controls. It relies on activation events and
+   must be applied after activation measurement is installed.
 7. Apply `monetization.sql` after `gamification.sql`. It adds server-managed
    Rimbly Pro subscriptions and payment records, a Pro flair on leaderboards,
    five free quiz submissions and three free battle invites per UTC day, and
@@ -151,3 +155,8 @@ loss adds no bonus points. Wins build streaks and leaderboard titles.
 The browser uses only the anon key. The service-role key is required solely by
 the Edge Functions and must never be added to `.env` variables prefixed with
 `VITE_`.
+
+Ambassador totals count account signups attributed at account creation. A reward is
+earned once, after the referred account completes its first reviewed quiz and loads the
+answer review. The dashboard records earnings; it does not initiate or process a
+cash payout.
