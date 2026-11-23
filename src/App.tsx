@@ -3192,9 +3192,7 @@ function App() {
       setAmbassadorDashboard(await agreeToAmbassadorTerms());
     } catch (agreementError) {
       setAmbassadorError(
-        agreementError instanceof Error
-          ? agreementError.message
-          : "Could not create your ambassador invite link.",
+        getErrorMessage(agreementError, "Could not create your ambassador invite link."),
       );
     } finally {
       setAmbassadorBusy(false);
