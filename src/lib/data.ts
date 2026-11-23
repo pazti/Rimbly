@@ -1453,6 +1453,11 @@ export async function agreeToAmbassadorTerms() {
 
 export async function getAdminAmbassadors() {
   const { data, error } = await requireSupabase().rpc("admin_list_ambassadors");
+  if (error?.code === "PGRST202" || error?.code === "42883") {
+    throw new Error(
+      "The ambassador admin RPC is unavailable. Apply supabase/ambassador-program.sql after the admin setup SQL, then reload the Supabase schema.",
+    );
+  }
   if (error) throw error;
   return (data ?? []) as AdminAmbassador[];
 }

@@ -816,13 +816,27 @@ function AppShell({
           <div className="topbar-inner">
             <Logo onClick={() => onNavigate("home")} />
             <strong className="mobile-page-title">{title}</strong>
-            <button
-              className="icon-btn notification-btn"
-              onClick={() => onNavigate("notifications")}
-              aria-label="Notifications"
-            >
-              <Icon>♧</Icon>
-            </button>
+            <div className="topbar-actions">
+              {adminAvailable && (
+                <button
+                  type="button"
+                  className="topbar-admin-link"
+                  onClick={() => onNavigate("admin")}
+                  aria-label="Open admin workspace"
+                  aria-current={route === "admin" ? "page" : undefined}
+                >
+                  <Icon>⚙</Icon>
+                  <span>Admin</span>
+                </button>
+              )}
+              <button
+                className="icon-btn notification-btn"
+                onClick={() => onNavigate("notifications")}
+                aria-label="Notifications"
+              >
+                <Icon>♧</Icon>
+              </button>
+            </div>
           </div>
         </header>
         <main className="app-main">{children}</main>
@@ -6017,6 +6031,7 @@ function AdminWorkspace({
   const [ambassadors, setAmbassadors] = useState<AdminAmbassador[]>([]);
   const [ambassadorsLoading, setAmbassadorsLoading] = useState(false);
   const [ambassadorsError, setAmbassadorsError] = useState<string | null>(null);
+  const [ambassadorsRetry, setAmbassadorsRetry] = useState(0);
   const [adminUniversities, setAdminUniversities] = useState<
     Array<{ id: string; name: string; is_active?: boolean }>
   >([]);
@@ -6193,9 +6208,7 @@ function AdminWorkspace({
       })
       .catch((loadError: unknown) => {
         if (active) {
-          setAmbassadorsError(
-            loadError instanceof Error ? loadError.message : "Could not load ambassadors.",
-          );
+          setAmbassadorsError(getErrorMessage(loadError, "Could not load ambassadors."));
         }
       })
       .finally(() => {
@@ -6204,7 +6217,7 @@ function AdminWorkspace({
     return () => {
       active = false;
     };
-  }, [access, canManageAmbassadors, section]);
+  }, [access, ambassadorsRetry, canManageAmbassadors, section]);
 
   useEffect(() => {
     if (!access || section !== "academics" || !canManageAcademics) return;
@@ -7139,12 +7152,28 @@ function AdminWorkspace({
                     <span className="eyebrow">Student referral program</span>
                     <h2>Ambassadors</h2>
                   </div>
-                  <span>{ambassadors.length} ambassadors</span>
+                  <span>
+                    {ambassadorsLoading
+                      ? "Loading…"
+                      : ambassadorsError
+                        ? "Load failed"
+                        : `${ambassadors.length} ambassadors`}
+                  </span>
                 </div>
                 {ambassadorsError && (
-                  <p className="app-feedback" role="alert">
-                    {ambassadorsError}
-                  </p>
+                  <>
+                    <p className="app-feedback" role="alert">
+                      {ambassadorsError}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={ambassadorsLoading}
+                      onClick={() => setAmbassadorsRetry((current) => current + 1)}
+                    >
+                      Try loading again
+                    </button>
+                  </>
                 )}
                 {ambassadorsLoading ? (
                   <p className="field-note" role="status">
@@ -7204,7 +7233,7 @@ function AdminWorkspace({
                       </div>
                     </article>
                   ))
-                ) : (
+                ) : ambassadorsError ? null : (
                   <EmptyState
                     title="No ambassadors yet"
                     text="Students who agree to the program rules will appear here."
