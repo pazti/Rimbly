@@ -22,9 +22,9 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    shared course metadata, optional paper-file replacement, quiz revisions across
    creators, editable-draft takeover, and quiz archival across creators. Course metadata
    changes apply to all papers linked to that course. Also apply
-   `quiz-random-ten-questions.sql` before `quiz-learning-ux.sql`. These app changes are
-   prepared in the repository, but the migrations must be applied before the live
-   database supports them.
+   `quiz-random-ten-questions.sql` before `quiz-learning-ux.sql`. These app changes
+   are prepared in the repository, but the migrations must be applied before the
+   live database supports them.
 6. Apply `gamification.sql` after the quiz migrations. Quizzes and battles award 10
    points per correct answer; battles add 25 points for a win or 8 for a draw.
    The migration adds UTC daily streaks, earned badges, and weekly/all-time
@@ -49,10 +49,23 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    usage/status reporting. The limits are enforced in database triggers, not
    only by the UI. Weekly, monthly, and semester payments grant 7 days, 1 month,
    and 4 months respectively; plans do not auto-renew. Then apply
-   `quiz-learning-ux.sql` to enable secure, post-submission answer review. The
-   Home daily-goal card also reads remaining allowance and today's completed
-   practice from the monetization status function.
-8. Apply `harden-submission-workflows.sql` after `quiz-learning-ux.sql`.
+   `library-documents.sql` to create the private document library, three-document
+   free allowance, Pro-aware backend access checks, protected PDF.js viewing,
+   reading progress, admin upload/publish controls, and conversion analytics.
+   Upload and publish actions are available in the Admin workspace under
+   Document library.
+   `quiz-learning-ux.sql` to enable secure, post-submission answer review, then
+   apply `quiz-attempt-review.sql`. That migration requires at least 10 approved
+   questions to publish a quiz, returns exactly 10 questions for each quiz, and
+   limits answer reviews to questions included in that attempt. The Home daily-goal
+   card also reads remaining allowance and today's completed practice from the
+   monetization status function. Library documents are not uploadable from the app
+   yet; add and publish records through the authorized server-side workflow only.
+   Library documents support signed streaming URLs, PDF.js in-app rendering,
+   server-checked entitlement, and per-user reading progress. Download and print
+   controls are omitted from the viewer.
+8. Apply `harden-submission-workflows.sql` after `quiz-learning-ux.sql` and
+   `quiz-attempt-review.sql`.
 9. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate. Then apply `guest-explore.sql` to expose a bounded,
    read-only course and reviewed-quiz catalog to signed-out visitors. The public
@@ -81,10 +94,10 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
     already recorded before the ambassador reward trigger was installed.
 11. Deploy the two Supabase Edge Functions from the repository root:
 
-   ```sh
-   supabase functions deploy admin-invite --project-ref YOUR_PROJECT_REF
-   supabase functions deploy admin-student-access --project-ref YOUR_PROJECT_REF
-   ```
+```sh
+supabase functions deploy admin-invite --project-ref YOUR_PROJECT_REF
+supabase functions deploy admin-student-access --project-ref YOUR_PROJECT_REF
+```
 
 12. Configure the Supabase Edge Function secrets. Use the exact deployed app
     origin for `APP_URL` and keep these values in Supabase secrets:

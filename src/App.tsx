@@ -1,5 +1,6 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
   AppNotification,
   AdminAccess,
@@ -19,6 +20,10 @@ import {
   AmbassadorPayoutSummary,
   MaintenanceStatus,
   RimblyBillingStatus,
+  LibraryAccessStatus,
+  LibraryDocument,
+  AdminLibraryDocument,
+  LibraryConversionMetrics,
   QuizAttemptReviewItem,
   Contribution,
   Battle,
@@ -111,6 +116,17 @@ import {
   reviewAdminContribution,
   toggleSavedCourse,
   getMyRimblyBillingStatus,
+  getLibraryAccessStatus,
+  getLibraryDocuments,
+  getLibraryDocumentReaderUrl,
+  getLibraryDocumentProgress,
+  requestLibraryDocumentAccess,
+  saveLibraryDocumentProgress,
+  recordLibraryConversionEvent,
+  getAdminLibraryDocuments,
+  uploadAdminLibraryDocument,
+  setAdminLibraryDocumentStatus,
+  getAdminLibraryConversionMetrics,
   getQuizAttemptReview,
   useStreakRecoveryToken,
 } from "./lib/data";
@@ -128,6 +144,7 @@ type Route =
   | "onboarding"
   | "home"
   | "practice"
+  | "library"
   | "course"
   | "paper"
   | "quiz-setup"
@@ -161,6 +178,7 @@ const routes: Route[] = [
   "onboarding",
   "home",
   "practice",
+  "library",
   "course",
   "paper",
   "quiz-setup",
@@ -261,6 +279,7 @@ const toLocalDateTimeInput = (value: string | null | undefined) => {
 const navItems: { route: Route; label: string; icon: string }[] = [
   { route: "home", label: "Home", icon: "⌂" },
   { route: "practice", label: "Practice", icon: "▤" },
+  { route: "library", label: "Library", icon: "▣" },
   { route: "battle", label: "Battle", icon: "⚔" },
   { route: "leaderboard", label: "Leaders", icon: "♜" },
   { route: "profile", label: "Profile", icon: "◉" },
@@ -903,6 +922,12 @@ function AuthPage({
               : "Start with email and password. Add your university after you sign in."}
           </p>
         </div>
+        {!login && (
+          <p className="field-note" role="note">
+            We use your email for sign-in, verification, password resets, and to keep your learning
+            progress with your account. Rimbly will never ask for your email account password.
+          </p>
+        )}
         <Feedback error={error} clear={onClearError} />
         <form onSubmit={onSubmit} className="form-stack">
           <label>
@@ -926,6 +951,10 @@ function AuthPage({
               autoComplete={login ? "current-password" : "new-password"}
             />
           </label>
+          <small className="field-note">
+            This is your Rimbly password, not your email account password.
+            {!login && " Create a unique password just for Rimbly."}
+          </small>
           {!login && (
             <label>
               <span>Referral code (optional)</span>
@@ -2522,6 +2551,7 @@ function SubscriptionPage({
               : "Practise without daily limits, see how your scores are changing, and show off your Pro Scholar status."}
           </p>
           <div className="billing-pro-benefits">
+            <span>Full document library access</span>
             <span>Unlimited quiz practice</span>
             <span>30-day performance insights</span>
             <span>Pro Scholar flair</span>
@@ -2530,7 +2560,7 @@ function SubscriptionPage({
             {status?.is_pro ? "View plan options" : "Explore Pro plans"}{" "}
             <span aria-hidden="true">→</span>
           </a>
-          <small>Past-question library stays free · One-time plans, no auto-renewal</small>
+          <small>Past-question practice stays free · Pro unlocks the full document library</small>
         </div>
         <div className="billing-pro-hero-mark" aria-hidden="true">
           <span>STUDY WITH</span>
@@ -2569,6 +2599,7 @@ function SubscriptionPage({
           Billing request failed: {error}
         </p>
       )}
+      <LibraryPlanAccess />
       <section className="billing-current-plan">
         <div>
           <span className="eyebrow">Your plan</span>
@@ -2647,7 +2678,7 @@ function SubscriptionPage({
           <span className="eyebrow">Free Forever</span>
           <h2>Strong basics, always free</h2>
           <ul>
-            <li>Past-question library</li>
+            <li>Past-question practice and 3 free library documents</li>
             <li>5 quiz submissions per day</li>
             <li>3 one-on-one battle invites per day</li>
             <li>University leaderboard and standard titles</li>
@@ -2658,6 +2689,7 @@ function SubscriptionPage({
           <span className="eyebrow">Rimbly Pro</span>
           <h2>More room to improve</h2>
           <ul>
+            <li>Full document library access while Pro is active</li>
             <li>Unlimited quiz submissions and battle invites</li>
             <li>Detailed 30-day performance analytics</li>
             <li>Exclusive Pro Scholar profile and leaderboard flair</li>
@@ -2728,6 +2760,78 @@ function SubscriptionPage({
         </section>
       )}
     </>
+  );
+}
+
+function LibraryPlanAccess() {
+  const [status, setStatus] = useState<LibraryAccessStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getLibraryAccessStatus()
+      .then((result) => {
+        if (active) setStatus(result);
+      })
+      .catch((accessError: unknown) => {
+        if (active) {
+          setError(
+            accessError instanceof Error
+              ? accessError.message
+              : "Could not load library access details.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <section className="billing-usage" aria-labelledby="library-plan-access-title">
+      <div className="section-title">
+        <div>
+          <span>Document library</span>
+          <h2 id="library-plan-access-title">Your library access</h2>
+        </div>
+      </div>
+      {error ? (
+        <p className="app-feedback" role="alert">
+          {error}
+        </p>
+      ) : status ? (
+        <>
+          <div className="billing-current-plan">
+            <div>
+              <span className={`badge ${status.is_pro ? "badge-purple" : "badge-green"}`}>
+                {status.is_pro ? "PRO" : "FREE"}
+              </span>
+              <h2>{status.is_pro ? "Full library unlocked" : "Free access: 3 documents"}</h2>
+              <p>
+                {status.is_pro
+                  ? "Your active Pro plan includes all published library documents."
+                  : `${status.documents_used} of ${status.free_document_limit} free documents used.`}
+              </p>
+            </div>
+            {!status.is_pro && (
+              <a className="billing-pro-cta" href="#rimbly-pro-plans">
+                Unlock with Pro <span aria-hidden="true">→</span>
+              </a>
+            )}
+          </div>
+          <UsageMeter
+            label="Document unlocks"
+            used={status.documents_used}
+            limit={status.free_document_limit}
+            unlimited={status.is_pro}
+          />
+        </>
+      ) : (
+        <p className="field-note" role="status">
+          Checking library access…
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -2844,6 +2948,11 @@ function App() {
   const [billingStatusLoading, setBillingStatusLoading] = useState(true);
   const [billingStatusError, setBillingStatusError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [libraryDocuments, setLibraryDocuments] = useState<LibraryDocument[]>([]);
+  const [libraryDocumentsLoading, setLibraryDocumentsLoading] = useState(true);
+  const [libraryDocumentsError, setLibraryDocumentsError] = useState<string | null>(null);
+  const [libraryAccessStatus, setLibraryAccessStatus] = useState<LibraryAccessStatus | null>(null);
+  const [selectedLibraryDocumentId, setSelectedLibraryDocumentId] = useState<string | null>(null);
   const [universities, setUniversities] = useState<University[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -2947,6 +3056,7 @@ function App() {
     }
     setCheckoutBusy(true);
     setBillingStatusError(null);
+    void recordLibraryConversionEvent("pro_checkout_started", undefined, planId).catch(() => undefined);
     try {
       const response = await fetch("/api/squadco/checkout", {
         method: "POST",
@@ -2992,7 +3102,12 @@ function App() {
     setBillingStatusLoading(true);
     setBillingStatusError(null);
     try {
-      setBillingStatus(await getMyRimblyBillingStatus());
+      const [billing, library] = await Promise.all([
+        getMyRimblyBillingStatus(),
+        getLibraryAccessStatus(),
+      ]);
+      setBillingStatus(billing);
+      setLibraryAccessStatus(library);
     } catch (statusError) {
       setBillingStatusError(
         statusError instanceof Error ? statusError.message : "Could not load subscription details.",
@@ -3230,6 +3345,39 @@ function App() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!user) {
+      setLibraryDocuments([]);
+      setLibraryAccessStatus(null);
+      setLibraryDocumentsLoading(false);
+      setLibraryDocumentsError(null);
+      return;
+    }
+    let active = true;
+    setLibraryDocumentsLoading(true);
+    setLibraryDocumentsError(null);
+    void Promise.all([getLibraryDocuments(), getLibraryAccessStatus()])
+      .then(([documents, access]) => {
+        if (!active) return;
+        setLibraryDocuments(documents);
+        setLibraryAccessStatus(access);
+      })
+      .catch((libraryError: unknown) => {
+        if (!active) return;
+        setLibraryDocumentsError(
+          libraryError instanceof Error
+            ? libraryError.message
+            : "Could not load the document library.",
+        );
+      })
+      .finally(() => {
+        if (active) setLibraryDocumentsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
     if (!user) return;
     const interval = window.setInterval(() => {
       const currentDate = new Date().toISOString().slice(0, 10);
@@ -3294,6 +3442,11 @@ function App() {
         if (!active) return;
         setBillingStatus(status);
         setBillingStatusError(null);
+        void getLibraryAccessStatus()
+          .then((libraryStatus) => {
+            if (active) setLibraryAccessStatus(libraryStatus);
+          })
+          .catch(() => undefined);
         if (
           paymentReference &&
           status.latest_payment_ref === paymentReference &&
@@ -3856,8 +4009,8 @@ function App() {
     setError(null);
     try {
       const nextQuestions = await getQuizSetQuestions(quizId);
-      if (!nextQuestions.length) {
-        setError("This quiz has no approved questions yet.");
+      if (nextQuestions.length !== 10) {
+        setError("This quiz needs at least 10 approved questions before you can take it.");
         return;
       }
       const quizSet = publishedQuizSets.find((item) => item.id === quizId);
@@ -4761,6 +4914,39 @@ function App() {
             navigate("course");
           }}
           onNavigate={navigate}
+        />
+      );
+      break;
+    case "library":
+      title = "Document library";
+      content = (
+        <LibraryPage
+          documents={libraryDocuments}
+          loading={libraryDocumentsLoading}
+          error={libraryDocumentsError}
+          accessStatus={libraryAccessStatus}
+          selectedDocumentId={selectedLibraryDocumentId}
+          watermark={`${profile.full_name || "Rimbly student"} · ${profile.university || "Student"}`}
+          onSelect={(documentId) => setSelectedLibraryDocumentId(documentId)}
+          onClose={() => setSelectedLibraryDocumentId(null)}
+          onUnlock={() => navigate("subscription")}
+          onRefresh={() => {
+            setLibraryDocumentsLoading(true);
+            void Promise.all([getLibraryDocuments(), getLibraryAccessStatus()])
+              .then(([documents, access]) => {
+                setLibraryDocuments(documents);
+                setLibraryAccessStatus(access);
+                setLibraryDocumentsError(null);
+              })
+              .catch((libraryError: unknown) => {
+                setLibraryDocumentsError(
+                  libraryError instanceof Error
+                    ? libraryError.message
+                    : "Could not refresh the document library.",
+                );
+              })
+              .finally(() => setLibraryDocumentsLoading(false));
+          }}
         />
       );
       break;
@@ -6226,6 +6412,7 @@ function AdminWorkspace({
     | "overview"
     | "contributions"
     | "papers"
+    | "library"
     | "quizzes"
     | "students"
     | "team"
@@ -6238,6 +6425,9 @@ function AdminWorkspace({
   const [contributions, setContributions] = useState<AdminContribution[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [papers, setPapers] = useState<AdminPaper[]>([]);
+  const [libraryDocuments, setLibraryDocuments] = useState<AdminLibraryDocument[]>([]);
+  const [libraryMetrics, setLibraryMetrics] =
+    useState<LibraryConversionMetrics | null>(null);
   const [editingPaperId, setEditingPaperId] = useState<string | null>(null);
   const [paperSearch, setPaperSearch] = useState("");
   const [quizPapers, setQuizPapers] = useState<AdminQuizPaper[]>([]);
@@ -6341,12 +6531,16 @@ function AdminWorkspace({
       canViewDashboard ? getAdminOverview() : Promise.resolve(null),
       canReview ? getAdminContributions() : Promise.resolve([]),
       canViewAudit ? getAdminAuditLogs() : Promise.resolve([]),
+      canManagePapers ? getAdminLibraryDocuments() : Promise.resolve([]),
+      canViewAnalytics ? getAdminLibraryConversionMetrics() : Promise.resolve(null),
     ])
-      .then(([nextOverview, nextContributions, nextAuditLogs]) => {
+      .then(([nextOverview, nextContributions, nextAuditLogs, nextLibrary, nextMetrics]) => {
         if (!active) return;
         setOverview(nextOverview);
         setContributions(nextContributions);
         setAuditLogs(nextAuditLogs);
+        setLibraryDocuments(nextLibrary as AdminLibraryDocument[]);
+        setLibraryMetrics(nextMetrics as LibraryConversionMetrics | null);
       })
       .catch((loadError: unknown) => {
         if (active) {
@@ -6605,6 +6799,61 @@ function AdminWorkspace({
     }
   };
 
+  const handleAdminLibraryUpload = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const file = values.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      setError("Choose a PDF document to upload.");
+      return;
+    }
+    setBusyId("library-upload");
+    setError(null);
+    setNotice(null);
+    try {
+      await uploadAdminLibraryDocument({
+        title: String(values.get("title") ?? "").trim(),
+        description: String(values.get("description") ?? "").trim(),
+        file,
+        pageCount: null,
+      });
+      setLibraryDocuments(await getAdminLibraryDocuments());
+      setNotice("Protected library document uploaded as a draft.");
+      form.reset();
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Could not upload the protected library document.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleAdminLibraryStatus = async (
+    documentId: string,
+    status: "published" | "archived",
+  ) => {
+    setBusyId(`library:${documentId}:${status}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await setAdminLibraryDocumentStatus(documentId, status);
+      setLibraryDocuments(await getAdminLibraryDocuments());
+      setNotice(status === "published" ? "Library document published." : "Library document archived.");
+    } catch (statusError) {
+      setError(
+        statusError instanceof Error
+          ? statusError.message
+          : "Could not update the library document.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleAdminPaperUpload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -6840,6 +7089,7 @@ function AdminWorkspace({
     { key: "overview", label: "Overview", visible: canViewDashboard },
     { key: "contributions", label: "Review queue", visible: canReview },
     { key: "papers", label: "Past questions", visible: canManagePapers },
+    { key: "library", label: "Document library", visible: canManagePapers },
     { key: "quizzes", label: "Quiz authoring", visible: canManageQuizzes },
     { key: "students", label: "Students", visible: canManageStudents },
     { key: "team", label: "Team", visible: canManageTeam },
@@ -7204,6 +7454,80 @@ function AdminWorkspace({
                     title="No past papers yet"
                     text="Papers you publish will appear here and in the student library."
                   />
+                )}
+              </section>
+            )}
+            {section === "library" && (
+              <section className="admin-review-list">
+                <div className="admin-section-heading">
+                  <div>
+                    <span className="eyebrow">Protected resources</span>
+                    <h2>Upload and publish library documents</h2>
+                  </div>
+                  <span>{libraryDocuments.length} documents</span>
+                </div>
+                {libraryMetrics && (
+                  <div className="stats-grid admin-library-metrics">
+                    <Stat icon="◎" value={String(libraryMetrics.document_opens)} label="Document opens" />
+                    <Stat icon="!" value={String(libraryMetrics.paywall_views)} label="Paywall views" />
+                    <Stat icon="✓" value={String(libraryMetrics.document_unlocks)} label="Document unlocks" />
+                    <Stat icon="→" value={String(libraryMetrics.checkout_starts)} label="Checkout starts" />
+                    <Stat icon="✦" value={String(libraryMetrics.subscriptions_activated)} label="Pro activations" />
+                  </div>
+                )}
+                <form className="admin-form" onSubmit={(event) => void handleAdminLibraryUpload(event)}>
+                  <label>
+                    <span>Document title</span>
+                    <input name="title" required maxLength={200} placeholder="Exam technique guide" />
+                  </label>
+                  <label>
+                    <span>Description</span>
+                    <textarea name="description" maxLength={1000} rows={3} placeholder="What students will learn" />
+                  </label>
+                  <label className="upload-area">
+                    <input name="file" type="file" accept=".pdf,application/pdf" required />
+                    <b>Choose a protected PDF</b>
+                    <small>PDF · Up to 30 MB · Downloads and printing are not enabled</small>
+                  </label>
+                  <button className="btn btn-primary" type="submit" disabled={busyId === "library-upload"}>
+                    {busyId === "library-upload" ? "Uploading…" : "Upload draft"}
+                  </button>
+                </form>
+                <div className="admin-section-heading">
+                  <div>
+                    <span className="eyebrow">Publishing</span>
+                    <h2>Library documents</h2>
+                  </div>
+                </div>
+                {libraryDocuments.length ? (
+                  libraryDocuments.map((document) => (
+                    <article className="admin-contribution" key={document.id}>
+                      <div>
+                        <strong>{document.title}</strong>
+                        <small>
+                          {document.file_name} · {document.status}
+                        </small>
+                      </div>
+                      {document.status !== "published" ? (
+                        <Button
+                          disabled={Boolean(busyId)}
+                          onClick={() => void handleAdminLibraryStatus(document.id, "published")}
+                        >
+                          Publish
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          disabled={Boolean(busyId)}
+                          onClick={() => void handleAdminLibraryStatus(document.id, "archived")}
+                        >
+                          Archive
+                        </Button>
+                      )}
+                    </article>
+                  ))
+                ) : (
+                  <EmptyState title="No library documents" text="Upload a protected PDF to begin." />
                 )}
               </section>
             )}
@@ -9540,10 +9864,10 @@ function BattlePage({
           <h1>Battle in progress.</h1>
           <p>More correct answers wins; equal scores are decided by faster time.</p>
         </div>
-        {questions.map((question) => (
+        {questions.map((question, questionIndex) => (
           <article className="battle-question" key={question.id}>
             <h2>
-              {question.position}. {question.prompt}
+              Question {questionIndex + 1} of {questions.length}: {question.prompt}
             </h2>
             <div className="answer-list">
               {question.options.map((option, index) => (
@@ -10169,6 +10493,396 @@ function SourceDocumentDialog({
   );
 }
 
+function LibraryPage({
+  documents,
+  loading,
+  error,
+  accessStatus,
+  selectedDocumentId,
+  watermark,
+  onSelect,
+  onClose,
+  onUnlock,
+  onRefresh,
+}: {
+  documents: LibraryDocument[];
+  loading: boolean;
+  error: string | null;
+  accessStatus: LibraryAccessStatus | null;
+  selectedDocumentId: string | null;
+  watermark: string;
+  onSelect: (documentId: string) => void;
+  onClose: () => void;
+  onUnlock: () => void;
+  onRefresh: () => void;
+}) {
+  const selectedDocument =
+    documents.find((document) => document.id === selectedDocumentId) ?? null;
+  const used = accessStatus?.documents_used ?? 0;
+  const limit = accessStatus?.free_document_limit ?? 3;
+  const limitReached = !accessStatus?.is_pro && used >= limit;
+
+  return (
+    <>
+      {selectedDocument ? (
+        <LibraryDocumentViewer
+          document={selectedDocument}
+          watermark={watermark}
+          limitReached={limitReached}
+          onClose={onClose}
+          onUnlock={onUnlock}
+        />
+      ) : (
+        <>
+          <div className="page-head compact">
+            <span className="eyebrow">Protected study resources</span>
+            <h1>Document library</h1>
+            <p>
+              {accessStatus?.is_pro
+                ? "Pro · Full document library access"
+                : accessStatus
+                  ? `${used} of ${limit} free documents used`
+                  : "Checking your document allowance…"}
+            </p>
+          </div>
+          <section className="library-access-banner" aria-label="Document access">
+            <div>
+              <span className={`badge ${accessStatus?.is_pro ? "badge-purple" : "badge-green"}`}>
+                {accessStatus?.is_pro ? "PRO" : "FREE"}
+              </span>
+              <h2>
+                {accessStatus?.is_pro
+                  ? "Unlimited protected documents"
+                  : limitReached
+                    ? "Free document allowance used"
+                    : `${limit - used} of ${limit} free documents remaining`}
+              </h2>
+              {!accessStatus?.is_pro && (
+                <p className="library-access-meter-copy">{used} of {limit} unlocked</p>
+              )}
+            </div>
+            {!accessStatus?.is_pro && (
+              <Button onClick={onUnlock}>{limitReached ? "Unlock with Pro" : "View Pro"}</Button>
+            )}
+          </section>
+          {error ? (
+            <div className="app-feedback" role="alert">
+              <span>{error}</span>
+              <button type="button" onClick={onRefresh} aria-label="Retry library loading">
+                ×
+              </button>
+            </div>
+          ) : loading ? (
+            <LoadingCards label="Loading protected documents" count={3} />
+          ) : documents.length ? (
+            <div className="library-document-grid">
+              {documents.map((document) => (
+                <article className="library-document-card" key={document.id}>
+                  <div className="library-document-icon" aria-hidden="true">
+                    PDF
+                  </div>
+                  <span className={`badge ${accessStatus?.is_pro ? "badge-purple" : "badge-green"}`}>
+                    {accessStatus?.is_pro ? "PRO · Unlocked" : limitReached ? "FREE LIMIT REACHED" : "FREE · 1 unlock"}
+                  </span>
+                  <h2>{document.title}</h2>
+                  <p>{document.description || "Protected study document."}</p>
+                  <small>
+                    {document.page_count
+                      ? `${document.page_count} pages`
+                      : document.file_name}
+                  </small>
+                  <Button variant="secondary" onClick={() => onSelect(document.id)}>
+                    Open document
+                  </Button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="No documents published"
+              text="Published protected documents will appear here."
+              action="Refresh library"
+              onAction={onRefresh}
+            />
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function LibraryDocumentViewer({
+  document,
+  watermark,
+  limitReached,
+  onClose,
+  onUnlock,
+}: {
+  document: LibraryDocument;
+  watermark: string;
+  limitReached: boolean;
+  onClose: () => void;
+  onUnlock: () => void;
+}) {
+  const [access, setAccess] = useState<"checking" | "allowed" | "paywall" | "error">("checking");
+  const [error, setError] = useState<string | null>(null);
+  const [readerUrl, setReaderUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setAccess("checking");
+    setError(null);
+    setReaderUrl(null);
+    void requestLibraryDocumentAccess(document.id)
+      .then(async (result) => {
+        if (!active) return;
+        if (!result.allowed) {
+          void recordLibraryConversionEvent("library_paywall_view", document.id).catch(
+            () => undefined,
+          );
+          setAccess("paywall");
+          return;
+        }
+        const url = await getLibraryDocumentReaderUrl(document.id);
+        if (active) {
+          void Promise.all([
+            recordLibraryConversionEvent("library_document_open", document.id),
+            ...(result.reason === "free_allowance"
+              ? [recordLibraryConversionEvent("library_document_unlocked", document.id)]
+              : []),
+          ]).catch(() => undefined);
+          setReaderUrl(url);
+          setAccess("allowed");
+        }
+      })
+      .catch((accessError: unknown) => {
+        if (!active) return;
+        setError(
+          accessError instanceof Error
+            ? accessError.message
+            : "Could not open this protected document.",
+        );
+        setAccess("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [document.id]);
+
+  return (
+    <>
+      <div className="page-head compact library-reader-head">
+        <div>
+          <span className="eyebrow">Protected document</span>
+          <h1>{document.title}</h1>
+        </div>
+        <Button variant="secondary" onClick={onClose}>
+          Back to library
+        </Button>
+      </div>
+      {access === "checking" && (
+        <p className="reader-loading" role="status">
+          Checking document access…
+        </p>
+      )}
+      {access === "paywall" && (
+        <section className="library-paywall" role="alert" aria-labelledby="library-paywall-title">
+          <span className="badge badge-purple">Free allowance used</span>
+          <h2 id="library-paywall-title">Unlock the full document library with Pro</h2>
+          <p>
+            {limitReached
+              ? "You have used all 3 free document unlocks."
+              : "This document needs a document unlock or an active Pro plan."}
+          </p>
+          <Button onClick={onUnlock}>Unlock with Pro</Button>
+          <Button variant="secondary" onClick={onClose}>
+            Back to library
+          </Button>
+        </section>
+      )}
+      {access === "error" && (
+        <p className="reader-error" role="alert">
+          {error}
+        </p>
+      )}
+      {access === "allowed" && readerUrl && (
+        <PdfDocumentViewer
+          documentId={document.id}
+          src={readerUrl}
+          title={document.title}
+          watermark={watermark}
+        />
+      )}
+    </>
+  );
+}
+
+function PdfDocumentViewer({
+  documentId,
+  src,
+  title,
+  watermark,
+}: {
+  documentId: string;
+  title: string;
+  src: string;
+  watermark: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pdfRef = useRef<PDFDocumentProxy | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    void (async () => {
+      try {
+        const [pdfModule, workerModule] = await Promise.all([
+          import("pdfjs-dist"),
+          import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
+        ]);
+        pdfModule.GlobalWorkerOptions.workerSrc = workerModule.default;
+        const pdf = await pdfModule.getDocument({ url: src }).promise;
+        if (!active) return;
+        pdfRef.current = pdf;
+        setPageCount(pdf.numPages);
+        const progress = await getLibraryDocumentProgress(documentId);
+        if (active) setPage(Math.min(Math.max(progress.last_page, 1), pdf.numPages));
+      } catch (loadError) {
+        if (active) {
+          setError(
+            loadError instanceof Error ? loadError.message : "Could not load this PDF.",
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [documentId, src]);
+
+  useEffect(() => {
+    if (!pdfRef.current || !canvasRef.current || loading) return;
+    let active = true;
+    void (async () => {
+      try {
+        const pdfPage = await pdfRef.current!.getPage(page);
+        if (!active) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        const containerWidth = canvas.parentElement?.getBoundingClientRect().width ?? 800;
+        const baseViewport = pdfPage.getViewport({ scale: 1 });
+        const scale = Math.max(0.5, Math.min(2.5, (containerWidth - 32) / baseViewport.width));
+        const viewport = pdfPage.getViewport({ scale });
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(viewport.width * pixelRatio);
+        canvas.height = Math.floor(viewport.height * pixelRatio);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        await pdfPage.render({
+          canvas,
+          canvasContext: context,
+          viewport,
+        }).promise;
+      } catch (renderError) {
+        if (active) {
+          setError(
+            renderError instanceof Error ? renderError.message : "Could not render this page.",
+          );
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [page, pageCount, loading]);
+
+  useEffect(() => {
+    if (loading || pageCount < 1) return;
+    const timeout = window.setTimeout(() => {
+      void saveLibraryDocumentProgress(documentId, page, pageCount).catch(() => undefined);
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [documentId, page, pageCount, loading]);
+
+  useEffect(() => {
+    const preventProtectedKeys = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        ["p", "s"].includes(event.key.toLowerCase())
+      ) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", preventProtectedKeys);
+    return () => window.removeEventListener("keydown", preventProtectedKeys);
+  }, []);
+
+  const progress = pageCount ? Math.round((page / pageCount) * 100) : 0;
+
+  return (
+    <section
+      className="library-pdf-viewer protected-document"
+      aria-label={title}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <div className="viewer-toolbar" aria-label="PDF viewer controls">
+        <button
+          type="button"
+          disabled={page <= 1 || loading}
+          onClick={() => setPage((current) => Math.max(1, current - 1))}
+          aria-label="Previous page"
+        >
+          ‹
+        </button>
+        <span>
+          Page {page} of {pageCount}
+        </span>
+        <button
+          type="button"
+          disabled={page >= pageCount || loading}
+          onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+          aria-label="Next page"
+        >
+          ›
+        </button>
+        <i />
+        <strong>{progress}% read</strong>
+      </div>
+      <div className="library-pdf-progress" aria-hidden="true">
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      {error ? (
+        <p className="reader-error" role="alert">
+          {error}
+        </p>
+      ) : loading ? (
+        <p className="reader-loading" role="status">
+          Rendering protected PDF…
+        </p>
+      ) : (
+        <div className="library-pdf-canvas-wrap">
+          <canvas ref={canvasRef} aria-label={`Page ${page} of ${title}`} />
+          <div className="document-watermark" aria-hidden="true">
+            {Array.from({ length: 9 }, (_, index) => (
+              <span key={index}>{watermark} · RIMBLY</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ProtectedDocumentSurface({
   src,
   title,
@@ -10263,7 +10977,6 @@ function QuizPage({
         ))}
       </nav>
       <main className="question-wrap">
-        <span className="badge badge-purple">{question.position}</span>
         <h1>{question.prompt}</h1>
         <div className="answer-list">
           {options.map((option, choice) => (
@@ -10426,7 +11139,7 @@ function ResultsPage({
           </p>
         ) : review.length ? (
           <div className="quiz-review-list">
-            {review.map((item) => {
+            {review.map((item, reviewIndex) => {
               const isCorrect = item.selected_index === item.correct_index;
               return (
                 <article
@@ -10434,7 +11147,7 @@ function ResultsPage({
                   key={item.id}
                 >
                   <div className="quiz-review-heading">
-                    <span>Question {item.position}</span>
+                    <span>Question {reviewIndex + 1}</span>
                     <strong>{isCorrect ? "Correct" : "Review this one"}</strong>
                   </div>
                   <h3>{item.prompt}</h3>

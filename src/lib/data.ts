@@ -186,9 +186,59 @@ export interface RimblyBillingStatus {
   latest_payment_status: "pending" | "paid" | "failed" | null;
 }
 
+export interface LibraryAccessStatus {
+  is_pro: boolean;
+  documents_used: number;
+  free_document_limit: number;
+  documents_remaining: number;
+}
+
+export interface LibraryDocument {
+  id: string;
+  title: string;
+  description: string;
+  file_name: string;
+  page_count: number | null;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface LibraryDocumentAccessResult {
+  allowed: boolean;
+  reason: "previously_unlocked" | "pro" | "free_allowance" | "free_limit_reached";
+  is_pro: boolean;
+  documents_used: number;
+  free_document_limit: number;
+}
+
+export interface AdminLibraryDocument {
+  id: string;
+  title: string;
+  description: string;
+  file_name: string;
+  page_count: number | null;
+  status: "draft" | "published" | "archived";
+  created_at: string;
+  published_at: string | null;
+}
+
+export interface LibraryConversionMetrics {
+  document_opens: number;
+  paywall_views: number;
+  document_unlocks: number;
+  checkout_starts: number;
+  subscriptions_activated: number;
+}
+
+export interface LibraryDocumentProgress {
+  last_page: number;
+  page_count: number;
+  progress_percent: number;
+  updated_at: string | null;
+}
+
 export interface QuizAttemptReviewItem {
   id: string;
-  position: number;
   prompt: string;
   options: string[];
   correct_index: number;
@@ -779,6 +829,168 @@ export async function getMyRimblyBillingStatus() {
   const { data, error } = await requireSupabase().rpc("get_my_rimbly_billing_status");
   if (error) throw error;
   return data as RimblyBillingStatus;
+}
+
+export async function getLibraryAccessStatus() {
+  const { data, error } = await requireSupabase().rpc("get_my_library_access_status");
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Library access is not installed yet. Apply supabase/library-documents.sql through the authorized migration workflow.",
+      );
+    }
+    throw error;
+  }
+  return data as LibraryAccessStatus;
+}
+
+export async function getLibraryDocuments() {
+  const { data, error } = await requireSupabase()
+    .from("library_documents")
+    .select("id, title, description, file_name, page_count, published_at, created_at")
+    .eq("status", "published")
+    .order("published_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as LibraryDocument[];
+}
+
+export async function requestLibraryDocumentAccess(documentId: string) {
+  const { data, error } = await requireSupabase().rpc("request_library_document_access", {
+    p_document_id: documentId,
+  });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Library access is not installed yet. Apply supabase/library-documents.sql through the authorized migration workflow.",
+      );
+    }
+    throw error;
+  }
+  return data as LibraryDocumentAccessResult;
+}
+
+export async function getLibraryDocumentReaderUrl(documentId: string) {
+  const client = requireSupabase();
+  const { data: path, error: pathError } = await client.rpc(
+    "get_library_document_reader_path",
+    { p_document_id: documentId },
+  );
+  if (pathError) throw pathError;
+  if (typeof path !== "string") throw new Error("Could not resolve the protected document.");
+  const { data, error } = await client
+    .storage.from("library-documents")
+    .createSignedUrl(path, 600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+export async function getLibraryDocumentProgress(documentId: string) {
+  const { data, error } = await requireSupabase().rpc(
+    "get_my_library_document_progress",
+    { p_document_id: documentId },
+  );
+  if (error) throw error;
+  return data as LibraryDocumentProgress;
+}
+
+export async function saveLibraryDocumentProgress(
+  documentId: string,
+  lastPage: number,
+  pageCount: number,
+) {
+  const { data, error } = await requireSupabase().rpc("save_library_document_progress", {
+    p_document_id: documentId,
+    p_last_page: lastPage,
+    p_page_count: pageCount,
+  });
+  if (error) throw error;
+  return data as { last_page: number; progress_percent: number };
+}
+
+export async function recordLibraryConversionEvent(
+  eventName:
+    | "library_document_open"
+    | "library_paywall_view"
+    | "library_document_unlocked"
+    | "pro_checkout_started"
+    | "pro_subscription_activated",
+  documentId?: string,
+  planId?: RimblyPlanId,
+) {
+  const { data, error } = await requireSupabase().rpc("record_library_conversion_event", {
+    p_event_name: eventName,
+    p_document_id: documentId ?? null,
+    p_plan_id: planId ?? null,
+    p_metadata: {},
+  });
+  if (error) throw error;
+  return data as number;
+}
+
+export async function getAdminLibraryDocuments() {
+  const { data, error } = await requireSupabase().rpc("admin_list_library_documents");
+  if (error) throw error;
+  return (data ?? []) as AdminLibraryDocument[];
+}
+
+export async function uploadAdminLibraryDocument(input: {
+  title: string;
+  description: string;
+  file: File;
+  pageCount: number | null;
+}) {
+  const client = requireSupabase();
+  if (
+    input.file.size < 1 ||
+    input.file.size > 31457280 ||
+    input.file.type !== "application/pdf"
+  ) {
+    throw new Error("Choose a PDF library document up to 30 MB.");
+  }
+  const { data: userData, error: userError } = await client.auth.getUser();
+  if (userError) throw userError;
+  if (!userData.user) throw new Error("Sign in again before uploading.");
+
+  const storagePath = `${userData.user.id}/admin/library/${crypto.randomUUID()}-${input.file.name}`;
+  const { error: uploadError } = await client.storage
+    .from("library-documents")
+    .upload(storagePath, input.file, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+  if (uploadError) throw uploadError;
+
+  const { data, error } = await client.rpc("admin_upload_library_document", {
+    p_title: input.title,
+    p_description: input.description,
+    p_file_name: input.file.name,
+    p_storage_path: storagePath,
+    p_mime_type: "application/pdf",
+    p_file_size_bytes: input.file.size,
+    p_page_count: input.pageCount,
+  });
+  if (error) {
+    await client.storage.from("library-documents").remove([storagePath]);
+    throw error;
+  }
+  return data as string;
+}
+
+export async function setAdminLibraryDocumentStatus(
+  documentId: string,
+  status: "published" | "archived",
+) {
+  const { error } = await requireSupabase().rpc("admin_set_library_document_status", {
+    p_document_id: documentId,
+    p_status: status,
+  });
+  if (error) throw error;
+}
+
+export async function getAdminLibraryConversionMetrics() {
+  const { data, error } = await requireSupabase().rpc("admin_get_library_conversion_metrics");
+  if (error) throw error;
+  return data as LibraryConversionMetrics;
 }
 
 export async function getAdminQuizSets() {
