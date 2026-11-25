@@ -49,11 +49,10 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    usage/status reporting. The limits are enforced in database triggers, not
    only by the UI. Weekly, monthly, and semester payments grant 7 days, 1 month,
    and 4 months respectively; plans do not auto-renew. Then apply
-   `library-documents.sql` to create the private document library, three-document
+   `past-paper-library-access.sql` to apply the three-past-paper
    free allowance, Pro-aware backend access checks, protected PDF.js viewing,
-   reading progress, admin upload/publish controls, and conversion analytics.
-   Upload and publish actions are available in the Admin workspace under
-   Document library.
+   and reading progress for the existing Past Questions library. Upload and
+   publish past papers through the existing Admin Past Questions workflow.
    `quiz-learning-ux.sql` to enable secure, post-submission answer review, then
    apply `quiz-attempt-review.sql`. That migration requires at least 10 approved
    questions to publish a quiz, returns exactly 10 questions for each quiz, and

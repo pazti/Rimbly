@@ -21,9 +21,6 @@ import {
   MaintenanceStatus,
   RimblyBillingStatus,
   LibraryAccessStatus,
-  LibraryDocument,
-  AdminLibraryDocument,
-  LibraryConversionMetrics,
   QuizAttemptReviewItem,
   Contribution,
   Battle,
@@ -91,6 +88,10 @@ import {
   getNotifications,
   getPapers,
   getPaperReaderUrl,
+  requestPastPaperAccess,
+  getPastPaperReaderUrl,
+  getPastPaperProgress,
+  savePastPaperProgress,
   extractAdminQuizQuestions,
   getProfile,
   getPublishedQuizSets,
@@ -117,16 +118,7 @@ import {
   toggleSavedCourse,
   getMyRimblyBillingStatus,
   getLibraryAccessStatus,
-  getLibraryDocuments,
-  getLibraryDocumentReaderUrl,
-  getLibraryDocumentProgress,
-  requestLibraryDocumentAccess,
-  saveLibraryDocumentProgress,
   recordLibraryConversionEvent,
-  getAdminLibraryDocuments,
-  uploadAdminLibraryDocument,
-  setAdminLibraryDocumentStatus,
-  getAdminLibraryConversionMetrics,
   getQuizAttemptReview,
   useStreakRecoveryToken,
 } from "./lib/data";
@@ -144,7 +136,6 @@ type Route =
   | "onboarding"
   | "home"
   | "practice"
-  | "library"
   | "course"
   | "paper"
   | "quiz-setup"
@@ -178,7 +169,6 @@ const routes: Route[] = [
   "onboarding",
   "home",
   "practice",
-  "library",
   "course",
   "paper",
   "quiz-setup",
@@ -279,7 +269,6 @@ const toLocalDateTimeInput = (value: string | null | undefined) => {
 const navItems: { route: Route; label: string; icon: string }[] = [
   { route: "home", label: "Home", icon: "⌂" },
   { route: "practice", label: "Practice", icon: "▤" },
-  { route: "library", label: "Library", icon: "▣" },
   { route: "battle", label: "Battle", icon: "⚔" },
   { route: "leaderboard", label: "Leaders", icon: "♜" },
   { route: "profile", label: "Profile", icon: "◉" },
@@ -2551,7 +2540,7 @@ function SubscriptionPage({
               : "Practise without daily limits, see how your scores are changing, and show off your Pro Scholar status."}
           </p>
           <div className="billing-pro-benefits">
-            <span>Full document library access</span>
+            <span>Full past-question library access</span>
             <span>Unlimited quiz practice</span>
             <span>30-day performance insights</span>
             <span>Pro Scholar flair</span>
@@ -2560,7 +2549,7 @@ function SubscriptionPage({
             {status?.is_pro ? "View plan options" : "Explore Pro plans"}{" "}
             <span aria-hidden="true">→</span>
           </a>
-          <small>Past-question practice stays free · Pro unlocks the full document library</small>
+          <small>Past-question practice stays free · Pro unlocks the full library</small>
         </div>
         <div className="billing-pro-hero-mark" aria-hidden="true">
           <span>STUDY WITH</span>
@@ -2678,7 +2667,7 @@ function SubscriptionPage({
           <span className="eyebrow">Free Forever</span>
           <h2>Strong basics, always free</h2>
           <ul>
-            <li>Past-question practice and 3 free library documents</li>
+            <li>Past questions · 3 free paper unlocks</li>
             <li>5 quiz submissions per day</li>
             <li>3 one-on-one battle invites per day</li>
             <li>University leaderboard and standard titles</li>
@@ -2689,7 +2678,7 @@ function SubscriptionPage({
           <span className="eyebrow">Rimbly Pro</span>
           <h2>More room to improve</h2>
           <ul>
-            <li>Full document library access while Pro is active</li>
+            <li>Full past-question library access while Pro is active</li>
             <li>Unlimited quiz submissions and battle invites</li>
             <li>Detailed 30-day performance analytics</li>
             <li>Exclusive Pro Scholar profile and leaderboard flair</li>
@@ -2791,8 +2780,8 @@ function LibraryPlanAccess() {
     <section className="billing-usage" aria-labelledby="library-plan-access-title">
       <div className="section-title">
         <div>
-          <span>Document library</span>
-          <h2 id="library-plan-access-title">Your library access</h2>
+            <span>Past-question library</span>
+          <h2 id="library-plan-access-title">Your paper access</h2>
         </div>
       </div>
       {error ? (
@@ -2806,11 +2795,11 @@ function LibraryPlanAccess() {
               <span className={`badge ${status.is_pro ? "badge-purple" : "badge-green"}`}>
                 {status.is_pro ? "PRO" : "FREE"}
               </span>
-              <h2>{status.is_pro ? "Full library unlocked" : "Free access: 3 documents"}</h2>
+              <h2>{status.is_pro ? "Full past-question library unlocked" : "Free access: 3 past papers"}</h2>
               <p>
                 {status.is_pro
-                  ? "Your active Pro plan includes all published library documents."
-                  : `${status.documents_used} of ${status.free_document_limit} free documents used.`}
+                  ? "Your active Pro plan includes all published past papers."
+                  : `${status.documents_used} of ${status.free_document_limit} free past papers used.`}
               </p>
             </div>
             {!status.is_pro && (
@@ -2948,11 +2937,7 @@ function App() {
   const [billingStatusLoading, setBillingStatusLoading] = useState(true);
   const [billingStatusError, setBillingStatusError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
-  const [libraryDocuments, setLibraryDocuments] = useState<LibraryDocument[]>([]);
-  const [libraryDocumentsLoading, setLibraryDocumentsLoading] = useState(true);
-  const [libraryDocumentsError, setLibraryDocumentsError] = useState<string | null>(null);
   const [libraryAccessStatus, setLibraryAccessStatus] = useState<LibraryAccessStatus | null>(null);
-  const [selectedLibraryDocumentId, setSelectedLibraryDocumentId] = useState<string | null>(null);
   const [universities, setUniversities] = useState<University[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -3346,35 +3331,12 @@ function App() {
 
   useEffect(() => {
     if (!user) {
-      setLibraryDocuments([]);
       setLibraryAccessStatus(null);
-      setLibraryDocumentsLoading(false);
-      setLibraryDocumentsError(null);
       return;
     }
-    let active = true;
-    setLibraryDocumentsLoading(true);
-    setLibraryDocumentsError(null);
-    void Promise.all([getLibraryDocuments(), getLibraryAccessStatus()])
-      .then(([documents, access]) => {
-        if (!active) return;
-        setLibraryDocuments(documents);
-        setLibraryAccessStatus(access);
-      })
-      .catch((libraryError: unknown) => {
-        if (!active) return;
-        setLibraryDocumentsError(
-          libraryError instanceof Error
-            ? libraryError.message
-            : "Could not load the document library.",
-        );
-      })
-      .finally(() => {
-        if (active) setLibraryDocumentsLoading(false);
-      });
-    return () => {
-      active = false;
-    };
+    void getLibraryAccessStatus()
+      .then((access) => setLibraryAccessStatus(access))
+      .catch(() => setLibraryAccessStatus(null));
   }, [user?.id]);
 
   useEffect(() => {
@@ -4917,39 +4879,6 @@ function App() {
         />
       );
       break;
-    case "library":
-      title = "Document library";
-      content = (
-        <LibraryPage
-          documents={libraryDocuments}
-          loading={libraryDocumentsLoading}
-          error={libraryDocumentsError}
-          accessStatus={libraryAccessStatus}
-          selectedDocumentId={selectedLibraryDocumentId}
-          watermark={`${profile.full_name || "Rimbly student"} · ${profile.university || "Student"}`}
-          onSelect={(documentId) => setSelectedLibraryDocumentId(documentId)}
-          onClose={() => setSelectedLibraryDocumentId(null)}
-          onUnlock={() => navigate("subscription")}
-          onRefresh={() => {
-            setLibraryDocumentsLoading(true);
-            void Promise.all([getLibraryDocuments(), getLibraryAccessStatus()])
-              .then(([documents, access]) => {
-                setLibraryDocuments(documents);
-                setLibraryAccessStatus(access);
-                setLibraryDocumentsError(null);
-              })
-              .catch((libraryError: unknown) => {
-                setLibraryDocumentsError(
-                  libraryError instanceof Error
-                    ? libraryError.message
-                    : "Could not refresh the document library.",
-                );
-              })
-              .finally(() => setLibraryDocumentsLoading(false));
-          }}
-        />
-      );
-      break;
     case "course":
       title = "Course";
       content = selectedCourse ? (
@@ -5047,6 +4976,7 @@ function App() {
               )
             }
             onBattle={() => navigate("battle")}
+            onUnlock={() => navigate("subscription")}
           />
         ) : (
           <EmptyState
@@ -6412,7 +6342,6 @@ function AdminWorkspace({
     | "overview"
     | "contributions"
     | "papers"
-    | "library"
     | "quizzes"
     | "students"
     | "team"
@@ -6425,9 +6354,6 @@ function AdminWorkspace({
   const [contributions, setContributions] = useState<AdminContribution[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [papers, setPapers] = useState<AdminPaper[]>([]);
-  const [libraryDocuments, setLibraryDocuments] = useState<AdminLibraryDocument[]>([]);
-  const [libraryMetrics, setLibraryMetrics] =
-    useState<LibraryConversionMetrics | null>(null);
   const [editingPaperId, setEditingPaperId] = useState<string | null>(null);
   const [paperSearch, setPaperSearch] = useState("");
   const [quizPapers, setQuizPapers] = useState<AdminQuizPaper[]>([]);
@@ -6531,16 +6457,12 @@ function AdminWorkspace({
       canViewDashboard ? getAdminOverview() : Promise.resolve(null),
       canReview ? getAdminContributions() : Promise.resolve([]),
       canViewAudit ? getAdminAuditLogs() : Promise.resolve([]),
-      canManagePapers ? getAdminLibraryDocuments() : Promise.resolve([]),
-      canViewAnalytics ? getAdminLibraryConversionMetrics() : Promise.resolve(null),
     ])
-      .then(([nextOverview, nextContributions, nextAuditLogs, nextLibrary, nextMetrics]) => {
+      .then(([nextOverview, nextContributions, nextAuditLogs]) => {
         if (!active) return;
         setOverview(nextOverview);
         setContributions(nextContributions);
         setAuditLogs(nextAuditLogs);
-        setLibraryDocuments(nextLibrary as AdminLibraryDocument[]);
-        setLibraryMetrics(nextMetrics as LibraryConversionMetrics | null);
       })
       .catch((loadError: unknown) => {
         if (active) {
@@ -6799,61 +6721,6 @@ function AdminWorkspace({
     }
   };
 
-  const handleAdminLibraryUpload = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const values = new FormData(form);
-    const file = values.get("file");
-    if (!(file instanceof File) || file.size === 0) {
-      setError("Choose a PDF document to upload.");
-      return;
-    }
-    setBusyId("library-upload");
-    setError(null);
-    setNotice(null);
-    try {
-      await uploadAdminLibraryDocument({
-        title: String(values.get("title") ?? "").trim(),
-        description: String(values.get("description") ?? "").trim(),
-        file,
-        pageCount: null,
-      });
-      setLibraryDocuments(await getAdminLibraryDocuments());
-      setNotice("Protected library document uploaded as a draft.");
-      form.reset();
-    } catch (uploadError) {
-      setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "Could not upload the protected library document.",
-      );
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleAdminLibraryStatus = async (
-    documentId: string,
-    status: "published" | "archived",
-  ) => {
-    setBusyId(`library:${documentId}:${status}`);
-    setError(null);
-    setNotice(null);
-    try {
-      await setAdminLibraryDocumentStatus(documentId, status);
-      setLibraryDocuments(await getAdminLibraryDocuments());
-      setNotice(status === "published" ? "Library document published." : "Library document archived.");
-    } catch (statusError) {
-      setError(
-        statusError instanceof Error
-          ? statusError.message
-          : "Could not update the library document.",
-      );
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   const handleAdminPaperUpload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -7089,7 +6956,6 @@ function AdminWorkspace({
     { key: "overview", label: "Overview", visible: canViewDashboard },
     { key: "contributions", label: "Review queue", visible: canReview },
     { key: "papers", label: "Past questions", visible: canManagePapers },
-    { key: "library", label: "Document library", visible: canManagePapers },
     { key: "quizzes", label: "Quiz authoring", visible: canManageQuizzes },
     { key: "students", label: "Students", visible: canManageStudents },
     { key: "team", label: "Team", visible: canManageTeam },
@@ -7454,80 +7320,6 @@ function AdminWorkspace({
                     title="No past papers yet"
                     text="Papers you publish will appear here and in the student library."
                   />
-                )}
-              </section>
-            )}
-            {section === "library" && (
-              <section className="admin-review-list">
-                <div className="admin-section-heading">
-                  <div>
-                    <span className="eyebrow">Protected resources</span>
-                    <h2>Upload and publish library documents</h2>
-                  </div>
-                  <span>{libraryDocuments.length} documents</span>
-                </div>
-                {libraryMetrics && (
-                  <div className="stats-grid admin-library-metrics">
-                    <Stat icon="◎" value={String(libraryMetrics.document_opens)} label="Document opens" />
-                    <Stat icon="!" value={String(libraryMetrics.paywall_views)} label="Paywall views" />
-                    <Stat icon="✓" value={String(libraryMetrics.document_unlocks)} label="Document unlocks" />
-                    <Stat icon="→" value={String(libraryMetrics.checkout_starts)} label="Checkout starts" />
-                    <Stat icon="✦" value={String(libraryMetrics.subscriptions_activated)} label="Pro activations" />
-                  </div>
-                )}
-                <form className="admin-form" onSubmit={(event) => void handleAdminLibraryUpload(event)}>
-                  <label>
-                    <span>Document title</span>
-                    <input name="title" required maxLength={200} placeholder="Exam technique guide" />
-                  </label>
-                  <label>
-                    <span>Description</span>
-                    <textarea name="description" maxLength={1000} rows={3} placeholder="What students will learn" />
-                  </label>
-                  <label className="upload-area">
-                    <input name="file" type="file" accept=".pdf,application/pdf" required />
-                    <b>Choose a protected PDF</b>
-                    <small>PDF · Up to 30 MB · Downloads and printing are not enabled</small>
-                  </label>
-                  <button className="btn btn-primary" type="submit" disabled={busyId === "library-upload"}>
-                    {busyId === "library-upload" ? "Uploading…" : "Upload draft"}
-                  </button>
-                </form>
-                <div className="admin-section-heading">
-                  <div>
-                    <span className="eyebrow">Publishing</span>
-                    <h2>Library documents</h2>
-                  </div>
-                </div>
-                {libraryDocuments.length ? (
-                  libraryDocuments.map((document) => (
-                    <article className="admin-contribution" key={document.id}>
-                      <div>
-                        <strong>{document.title}</strong>
-                        <small>
-                          {document.file_name} · {document.status}
-                        </small>
-                      </div>
-                      {document.status !== "published" ? (
-                        <Button
-                          disabled={Boolean(busyId)}
-                          onClick={() => void handleAdminLibraryStatus(document.id, "published")}
-                        >
-                          Publish
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          disabled={Boolean(busyId)}
-                          onClick={() => void handleAdminLibraryStatus(document.id, "archived")}
-                        >
-                          Archive
-                        </Button>
-                      )}
-                    </article>
-                  ))
-                ) : (
-                  <EmptyState title="No library documents" text="Upload a protected PDF to begin." />
                 )}
               </section>
             )}
@@ -10270,6 +10062,7 @@ function PaperPage({
   watermark,
   onQuiz,
   onBattle,
+  onUnlock,
 }: {
   paper: Paper;
   course: Course;
@@ -10278,23 +10071,37 @@ function PaperPage({
   watermark: string;
   onQuiz: () => void;
   onBattle: () => void;
+  onUnlock: () => void;
 }) {
+  const [access, setAccess] = useState<"checking" | "allowed" | "paywall" | "error">("checking");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
+    setAccess("checking");
     setPreviewUrl(null);
     setPreviewError(null);
-    void getPaperReaderUrl(paper.file_path)
-      .then((url) => {
-        if (active) setPreviewUrl(url);
+    void requestPastPaperAccess(paper.id)
+      .then(async (result) => {
+        if (!active) return;
+        if (!result.allowed) {
+          setAccess("paywall");
+          return;
+        }
+        const url = await getPastPaperReaderUrl(paper.id);
+        if (active) {
+          setPreviewUrl(url);
+          setAccess("allowed");
+        }
       })
       .catch((loadError: unknown) => {
-        if (active)
+        if (active) {
           setPreviewError(
             loadError instanceof Error ? loadError.message : "Could not read the original paper.",
           );
+          setAccess("error");
+        }
       });
     return () => {
       active = false;
@@ -10376,19 +10183,35 @@ function PaperPage({
           <h2>Read the past paper</h2>
           <p>Unchanged source document. Quiz questions are entered and reviewed separately.</p>
         </div>
-        {previewUrl ? (
-          <ProtectedDocumentSurface
-            src={previewUrl}
-            title={`Original ${course.code} past paper`}
-            isPdf={/\.pdf(?:$|[?#])/i.test(paper.file_path)}
-            watermark={watermark}
-          />
+        {access === "allowed" && previewUrl ? (
+          /\.pdf(?:$|[?#])/i.test(paper.file_path) ? (
+            <PdfDocumentViewer
+              documentId={paper.id}
+              src={previewUrl}
+              title={`Original ${course.code} past paper`}
+              watermark={watermark}
+            />
+          ) : (
+            <ProtectedDocumentSurface
+              src={previewUrl}
+              title={`Original ${course.code} past paper`}
+              isPdf={false}
+              watermark={watermark}
+            />
+          )
+        ) : access === "paywall" ? (
+          <section className="library-paywall" role="alert" aria-labelledby="past-paper-paywall-title">
+            <span className="badge badge-purple">Free allowance used</span>
+            <h2 id="past-paper-paywall-title">Unlock the full past-question library with Pro</h2>
+            <p>You have used all 3 free past-paper unlocks.</p>
+            <Button onClick={onUnlock}>Unlock with Pro</Button>
+          </section>
         ) : (
           <p
             className={previewError ? "reader-error" : "reader-loading"}
             role={previewError ? "alert" : "status"}
           >
-            {previewError || "Loading the source document…"}
+            {previewError || "Checking past-paper access…"}
           </p>
         )}
       </section>
@@ -10493,230 +10316,6 @@ function SourceDocumentDialog({
   );
 }
 
-function LibraryPage({
-  documents,
-  loading,
-  error,
-  accessStatus,
-  selectedDocumentId,
-  watermark,
-  onSelect,
-  onClose,
-  onUnlock,
-  onRefresh,
-}: {
-  documents: LibraryDocument[];
-  loading: boolean;
-  error: string | null;
-  accessStatus: LibraryAccessStatus | null;
-  selectedDocumentId: string | null;
-  watermark: string;
-  onSelect: (documentId: string) => void;
-  onClose: () => void;
-  onUnlock: () => void;
-  onRefresh: () => void;
-}) {
-  const selectedDocument =
-    documents.find((document) => document.id === selectedDocumentId) ?? null;
-  const used = accessStatus?.documents_used ?? 0;
-  const limit = accessStatus?.free_document_limit ?? 3;
-  const limitReached = !accessStatus?.is_pro && used >= limit;
-
-  return (
-    <>
-      {selectedDocument ? (
-        <LibraryDocumentViewer
-          document={selectedDocument}
-          watermark={watermark}
-          limitReached={limitReached}
-          onClose={onClose}
-          onUnlock={onUnlock}
-        />
-      ) : (
-        <>
-          <div className="page-head compact">
-            <span className="eyebrow">Protected study resources</span>
-            <h1>Document library</h1>
-            <p>
-              {accessStatus?.is_pro
-                ? "Pro · Full document library access"
-                : accessStatus
-                  ? `${used} of ${limit} free documents used`
-                  : "Checking your document allowance…"}
-            </p>
-          </div>
-          <section className="library-access-banner" aria-label="Document access">
-            <div>
-              <span className={`badge ${accessStatus?.is_pro ? "badge-purple" : "badge-green"}`}>
-                {accessStatus?.is_pro ? "PRO" : "FREE"}
-              </span>
-              <h2>
-                {accessStatus?.is_pro
-                  ? "Unlimited protected documents"
-                  : limitReached
-                    ? "Free document allowance used"
-                    : `${limit - used} of ${limit} free documents remaining`}
-              </h2>
-              {!accessStatus?.is_pro && (
-                <p className="library-access-meter-copy">{used} of {limit} unlocked</p>
-              )}
-            </div>
-            {!accessStatus?.is_pro && (
-              <Button onClick={onUnlock}>{limitReached ? "Unlock with Pro" : "View Pro"}</Button>
-            )}
-          </section>
-          {error ? (
-            <div className="app-feedback" role="alert">
-              <span>{error}</span>
-              <button type="button" onClick={onRefresh} aria-label="Retry library loading">
-                ×
-              </button>
-            </div>
-          ) : loading ? (
-            <LoadingCards label="Loading protected documents" count={3} />
-          ) : documents.length ? (
-            <div className="library-document-grid">
-              {documents.map((document) => (
-                <article className="library-document-card" key={document.id}>
-                  <div className="library-document-icon" aria-hidden="true">
-                    PDF
-                  </div>
-                  <span className={`badge ${accessStatus?.is_pro ? "badge-purple" : "badge-green"}`}>
-                    {accessStatus?.is_pro ? "PRO · Unlocked" : limitReached ? "FREE LIMIT REACHED" : "FREE · 1 unlock"}
-                  </span>
-                  <h2>{document.title}</h2>
-                  <p>{document.description || "Protected study document."}</p>
-                  <small>
-                    {document.page_count
-                      ? `${document.page_count} pages`
-                      : document.file_name}
-                  </small>
-                  <Button variant="secondary" onClick={() => onSelect(document.id)}>
-                    Open document
-                  </Button>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              title="No documents published"
-              text="Published protected documents will appear here."
-              action="Refresh library"
-              onAction={onRefresh}
-            />
-          )}
-        </>
-      )}
-    </>
-  );
-}
-
-function LibraryDocumentViewer({
-  document,
-  watermark,
-  limitReached,
-  onClose,
-  onUnlock,
-}: {
-  document: LibraryDocument;
-  watermark: string;
-  limitReached: boolean;
-  onClose: () => void;
-  onUnlock: () => void;
-}) {
-  const [access, setAccess] = useState<"checking" | "allowed" | "paywall" | "error">("checking");
-  const [error, setError] = useState<string | null>(null);
-  const [readerUrl, setReaderUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    setAccess("checking");
-    setError(null);
-    setReaderUrl(null);
-    void requestLibraryDocumentAccess(document.id)
-      .then(async (result) => {
-        if (!active) return;
-        if (!result.allowed) {
-          void recordLibraryConversionEvent("library_paywall_view", document.id).catch(
-            () => undefined,
-          );
-          setAccess("paywall");
-          return;
-        }
-        const url = await getLibraryDocumentReaderUrl(document.id);
-        if (active) {
-          void Promise.all([
-            recordLibraryConversionEvent("library_document_open", document.id),
-            ...(result.reason === "free_allowance"
-              ? [recordLibraryConversionEvent("library_document_unlocked", document.id)]
-              : []),
-          ]).catch(() => undefined);
-          setReaderUrl(url);
-          setAccess("allowed");
-        }
-      })
-      .catch((accessError: unknown) => {
-        if (!active) return;
-        setError(
-          accessError instanceof Error
-            ? accessError.message
-            : "Could not open this protected document.",
-        );
-        setAccess("error");
-      });
-    return () => {
-      active = false;
-    };
-  }, [document.id]);
-
-  return (
-    <>
-      <div className="page-head compact library-reader-head">
-        <div>
-          <span className="eyebrow">Protected document</span>
-          <h1>{document.title}</h1>
-        </div>
-        <Button variant="secondary" onClick={onClose}>
-          Back to library
-        </Button>
-      </div>
-      {access === "checking" && (
-        <p className="reader-loading" role="status">
-          Checking document access…
-        </p>
-      )}
-      {access === "paywall" && (
-        <section className="library-paywall" role="alert" aria-labelledby="library-paywall-title">
-          <span className="badge badge-purple">Free allowance used</span>
-          <h2 id="library-paywall-title">Unlock the full document library with Pro</h2>
-          <p>
-            {limitReached
-              ? "You have used all 3 free document unlocks."
-              : "This document needs a document unlock or an active Pro plan."}
-          </p>
-          <Button onClick={onUnlock}>Unlock with Pro</Button>
-          <Button variant="secondary" onClick={onClose}>
-            Back to library
-          </Button>
-        </section>
-      )}
-      {access === "error" && (
-        <p className="reader-error" role="alert">
-          {error}
-        </p>
-      )}
-      {access === "allowed" && readerUrl && (
-        <PdfDocumentViewer
-          documentId={document.id}
-          src={readerUrl}
-          title={document.title}
-          watermark={watermark}
-        />
-      )}
-    </>
-  );
-}
-
 function PdfDocumentViewer({
   documentId,
   src,
@@ -10750,7 +10349,7 @@ function PdfDocumentViewer({
         if (!active) return;
         pdfRef.current = pdf;
         setPageCount(pdf.numPages);
-        const progress = await getLibraryDocumentProgress(documentId);
+        const progress = await getPastPaperProgress(documentId);
         if (active) setPage(Math.min(Math.max(progress.last_page, 1), pdf.numPages));
       } catch (loadError) {
         if (active) {
@@ -10809,7 +10408,7 @@ function PdfDocumentViewer({
   useEffect(() => {
     if (loading || pageCount < 1) return;
     const timeout = window.setTimeout(() => {
-      void saveLibraryDocumentProgress(documentId, page, pageCount).catch(() => undefined);
+      void savePastPaperProgress(documentId, page, pageCount).catch(() => undefined);
     }, 350);
     return () => window.clearTimeout(timeout);
   }, [documentId, page, pageCount, loading]);
