@@ -20,6 +20,7 @@ import {
   AmbassadorPayoutSummary,
   MaintenanceStatus,
   RimblyBillingStatus,
+  LibraryDocumentAccessResult,
   LibraryAccessStatus,
   QuizAttemptReviewItem,
   Contribution,
@@ -88,6 +89,7 @@ import {
   getNotifications,
   getPapers,
   getPaperReaderUrl,
+  getPastPaperIdByPath,
   requestPastPaperAccess,
   getPastPaperReaderUrl,
   getPastPaperProgress,
@@ -121,6 +123,7 @@ import {
   recordLibraryConversionEvent,
   getQuizAttemptReview,
   useStreakRecoveryToken,
+  deleteOwnAccount,
 } from "./lib/data";
 import { supabase, supabaseConfigurationError } from "./lib/supabase";
 import { rimblyProPlans, RimblyPlanId } from "./lib/monetization";
@@ -146,6 +149,7 @@ type Route =
   | "leaderboard"
   | "ambassador"
   | "profile"
+  | "settings"
   | "subscription"
   | "contribute"
   | "suggest"
@@ -179,6 +183,7 @@ const routes: Route[] = [
   "leaderboard",
   "ambassador",
   "profile",
+  "settings",
   "subscription",
   "contribute",
   "suggest",
@@ -821,6 +826,13 @@ function AppShell({
           <button onClick={() => onNavigate("contribute")}>
             <Icon>↑</Icon>Contribute
           </button>
+          <button
+            className={route === "settings" ? "active" : ""}
+            aria-current={route === "settings" ? "page" : undefined}
+            onClick={() => onNavigate("settings")}
+          >
+            <Icon>⚙</Icon>Settings
+          </button>
         </div>
       </aside>
       <div className="app-column">
@@ -848,10 +860,28 @@ function AppShell({
               >
                 <Icon>♧</Icon>
               </button>
+              <button
+                className="icon-btn settings-btn"
+                onClick={() => onNavigate("settings")}
+                aria-label="Settings"
+                aria-current={route === "settings" ? "page" : undefined}
+              >
+                <Icon>⚙</Icon>
+              </button>
             </div>
           </div>
         </header>
         <main className="app-main">{children}</main>
+        <footer className="app-footer" aria-label="Rimbly information and support">
+          <a href="https://rimbly.vercel.app" target="_blank" rel="noreferrer">
+            Terms
+          </a>
+          <a href="https://rimbly.vercel.app" target="_blank" rel="noreferrer">
+            Privacy
+          </a>
+          <a href="mailto:paul@rizzbase.tech?subject=Rimbly%20support">Contact</a>
+          <a href="mailto:paul@rizzbase.tech?subject=Rimbly%20help">Help</a>
+        </footer>
         <nav className="bottom-nav" aria-label="Main navigation">
           {navItems.map((item) => (
             <button
@@ -1925,6 +1955,8 @@ function LearningProgressCard({
   }
   const currentRank = rankSteps[rankIndex];
   const nextRank = rankSteps[rankIndex + 1];
+  const quizzesToNextRank = nextRank ? Math.max(0, nextRank.quizzes - quizzesCompleted) : 0;
+  const daysToNextRank = nextRank ? Math.max(0, nextRank.streak - bestStreak) : 0;
   const rankProgress = nextRank
     ? Math.min(
         100,
@@ -2061,7 +2093,13 @@ function LearningProgressCard({
               : !progress
                 ? "Your quiz activity is still available below."
                 : nextRank
-                  ? `${Math.max(0, nextRank.points - points)} XP · ${Math.max(0, nextRank.quizzes - quizzesCompleted)} quizzes · ${Math.max(0, nextRank.streak - bestStreak)} streak days${Math.max(0, nextRank.improvements - improvements) ? ` · ${Math.max(0, nextRank.improvements - improvements)} score improvements` : ""} to ${nextRank.name}`
+                  ? `${Math.max(0, nextRank.points - points)} XP · ${quizzesToNextRank} ${
+                      quizzesToNextRank === 1 ? "quiz" : "quizzes"
+                    } · ${daysToNextRank} ${daysToNextRank === 1 ? "streak day" : "streak days"}${
+                      Math.max(0, nextRank.improvements - improvements)
+                        ? ` · ${Math.max(0, nextRank.improvements - improvements)} score improvements`
+                        : ""
+                    } to ${nextRank.name}`
                   : "You’ve reached the highest scholar rank."}
         </small>
       </div>
@@ -2755,6 +2793,7 @@ function SubscriptionPage({
 function LibraryPlanAccess() {
   const [status, setStatus] = useState<LibraryAccessStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const hasFullAccess = Boolean(status?.is_pro || status?.is_admin);
 
   useEffect(() => {
     let active = true;
@@ -2780,7 +2819,7 @@ function LibraryPlanAccess() {
     <section className="billing-usage" aria-labelledby="library-plan-access-title">
       <div className="section-title">
         <div>
-            <span>Past-question library</span>
+          <span>Past-question library</span>
           <h2 id="library-plan-access-title">Your paper access</h2>
         </div>
       </div>
@@ -2792,17 +2831,21 @@ function LibraryPlanAccess() {
         <>
           <div className="billing-current-plan">
             <div>
-              <span className={`badge ${status.is_pro ? "badge-purple" : "badge-green"}`}>
-                {status.is_pro ? "PRO" : "FREE"}
+              <span className={`badge ${hasFullAccess ? "badge-purple" : "badge-green"}`}>
+                {status.is_admin ? "ADMIN" : status.is_pro ? "PRO" : "FREE"}
               </span>
-              <h2>{status.is_pro ? "Full past-question library unlocked" : "Free access: 3 past papers"}</h2>
+              <h2>
+                {hasFullAccess ? "Full past-question library access" : "Free access: 3 past papers"}
+              </h2>
               <p>
-                {status.is_pro
-                  ? "Your active Pro plan includes all published past papers."
-                  : `${status.documents_used} of ${status.free_document_limit} free past papers used.`}
+                {status.is_admin
+                  ? "Your admin permissions include every published past paper."
+                  : status.is_pro
+                    ? "Your active Pro plan includes all published past papers."
+                    : `${status.documents_used} of ${status.free_document_limit} free past papers used.`}
               </p>
             </div>
-            {!status.is_pro && (
+            {!hasFullAccess && (
               <a className="billing-pro-cta" href="#rimbly-pro-plans">
                 Unlock with Pro <span aria-hidden="true">→</span>
               </a>
@@ -2812,7 +2855,7 @@ function LibraryPlanAccess() {
             label="Document unlocks"
             used={status.documents_used}
             limit={status.free_document_limit}
-            unlimited={status.is_pro}
+            unlimited={hasFullAccess}
           />
         </>
       ) : (
@@ -2938,6 +2981,18 @@ function App() {
   const [billingStatusError, setBillingStatusError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [libraryAccessStatus, setLibraryAccessStatus] = useState<LibraryAccessStatus | null>(null);
+  const updateLibraryAccessStatus = useCallback((result: LibraryDocumentAccessResult) => {
+    setLibraryAccessStatus({
+      is_pro: result.is_pro,
+      is_admin: result.is_admin,
+      documents_used: result.documents_used,
+      free_document_limit: result.free_document_limit,
+      documents_remaining:
+        result.is_pro || result.is_admin
+          ? null
+          : Math.max(0, result.free_document_limit - result.documents_used),
+    });
+  }, []);
   const [universities, setUniversities] = useState<University[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -3041,7 +3096,9 @@ function App() {
     }
     setCheckoutBusy(true);
     setBillingStatusError(null);
-    void recordLibraryConversionEvent("pro_checkout_started", undefined, planId).catch(() => undefined);
+    void recordLibraryConversionEvent("pro_checkout_started", undefined, planId).catch(
+      () => undefined,
+    );
     try {
       const response = await fetch("/api/squadco/checkout", {
         method: "POST",
@@ -3334,9 +3391,17 @@ function App() {
       setLibraryAccessStatus(null);
       return;
     }
+    let active = true;
     void getLibraryAccessStatus()
-      .then((access) => setLibraryAccessStatus(access))
-      .catch(() => setLibraryAccessStatus(null));
+      .then((access) => {
+        if (active) setLibraryAccessStatus(access);
+      })
+      .catch(() => {
+        if (active) setLibraryAccessStatus(null);
+      });
+    return () => {
+      active = false;
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -3857,6 +3922,93 @@ function App() {
     } catch (updateError) {
       setError(
         updateError instanceof Error ? updateError.message : "Could not update your password.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleChangePassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const password = String(form.get("new_password") ?? "");
+    const confirmation = String(form.get("confirm_password") ?? "");
+    if (password !== confirmation) {
+      setError("The new passwords do not match.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) throw updateError;
+      formElement.reset();
+      setNotice("Your password has been updated.");
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error ? updateError.message : "Could not update your password.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleNotificationPreference = async (enabled: boolean) => {
+    if (!supabase) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: { in_app_notifications_enabled: enabled },
+      });
+      if (updateError) throw updateError;
+      setNotice(enabled ? "In-app notifications are on." : "In-app notifications are hidden.");
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Could not update your notification preference.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteAccount = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !user?.email) return;
+    const form = new FormData(event.currentTarget);
+    const password = String(form.get("current_password") ?? "");
+    const confirmation = String(form.get("confirmation") ?? "");
+    if (confirmation !== "DELETE") {
+      setError('Type "DELETE" to confirm account deletion.');
+      return;
+    }
+    if (!window.confirm("Permanently delete your Rimbly account and personal account data?"))
+      return;
+
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password,
+      });
+      if (reauthError) throw new Error("Your current password is incorrect.");
+      await deleteOwnAccount();
+      const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+      if (signOutError) throw signOutError;
+      navigate("welcome");
+      setNotice("Your account has been deleted.");
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error ? deleteError.message : "Could not delete your account.",
       );
     } finally {
       setBusy(false);
@@ -4930,14 +5082,16 @@ function App() {
                     {matchingPapers.length === 1 ? "paper" : "papers"} for this course
                   </strong>
                   <p>
-                    {libraryAccessStatus?.is_pro
-                      ? "Your Pro plan opens every available session."
-                      : libraryAccessStatus
-                        ? `${Math.max(0, libraryAccessStatus.free_document_limit - libraryAccessStatus.documents_used)} free unlocks left. Pro opens every available session.`
-                        : "Your first 3 paper unlocks are free. Pro opens every available session."}
+                    {libraryAccessStatus?.is_admin
+                      ? "Your admin access includes every available session."
+                      : libraryAccessStatus?.is_pro
+                        ? "Your Pro plan opens every available session."
+                        : libraryAccessStatus
+                          ? `${Math.max(0, libraryAccessStatus.free_document_limit - libraryAccessStatus.documents_used)} free unlocks left. Pro opens every available session.`
+                          : "Your first 3 paper unlocks are free. Pro opens every available session."}
                   </p>
                 </div>
-                {!libraryAccessStatus?.is_pro && (
+                {!libraryAccessStatus?.is_pro && !libraryAccessStatus?.is_admin && (
                   <Button variant="secondary" onClick={() => navigate("subscription")}>
                     Explore Pro
                   </Button>
@@ -5001,6 +5155,7 @@ function App() {
             onBattle={() => navigate("battle")}
             onUnlock={() => navigate("subscription")}
             onBackToCourse={() => navigate("course")}
+            onAccessResult={updateLibraryAccessStatus}
           />
         ) : (
           <EmptyState
@@ -5054,6 +5209,7 @@ function App() {
           attempt={lastAttempt}
           paper={papers.find((paper) => paper.id === lastAttempt.paper_id)}
           isPro={Boolean(billingStatus?.is_pro)}
+          isAdmin={Boolean(libraryAccessStatus?.is_admin)}
           freePapersUsed={libraryAccessStatus?.documents_used ?? 0}
           freePaperLimit={libraryAccessStatus?.free_document_limit ?? 3}
           review={lastAttemptReview}
@@ -5236,6 +5392,111 @@ function App() {
             />
           )}
         </>
+      );
+      break;
+    case "settings":
+      title = "Settings";
+      content = (
+        <div className="settings-page">
+          <div className="page-head compact">
+            <span className="eyebrow">Account preferences</span>
+            <h1>Settings</h1>
+            <p>Manage your sign-in, notifications, and account.</p>
+          </div>
+          <section className="settings-card">
+            <div className="section-title">
+              <div>
+                <span>Security</span>
+                <h2>Change password</h2>
+              </div>
+            </div>
+            <form
+              className="form-stack profile-edit"
+              onSubmit={(event) => void handleChangePassword(event)}
+            >
+              <label>
+                <span>New password</span>
+                <input
+                  type="password"
+                  name="new_password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                />
+              </label>
+              <label>
+                <span>Confirm new password</span>
+                <input
+                  type="password"
+                  name="confirm_password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                />
+              </label>
+              <Button type="submit" disabled={busy}>
+                {busy ? "Saving…" : "Update password"}
+              </Button>
+            </form>
+          </section>
+          <section className="settings-card">
+            <div className="section-title">
+              <div>
+                <span>Preferences</span>
+                <h2>Notifications</h2>
+              </div>
+            </div>
+            <label className="settings-toggle">
+              <span>
+                <strong>Show in-app notifications</strong>
+                <small>
+                  When off, your saved notifications are hidden here and can be shown again any
+                  time.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                checked={user?.user_metadata.in_app_notifications_enabled !== false}
+                disabled={busy}
+                onChange={(event) => void handleNotificationPreference(event.currentTarget.checked)}
+              />
+            </label>
+          </section>
+          <section className="settings-card settings-danger">
+            <div className="section-title">
+              <div>
+                <span>Permanent action</span>
+                <h2>Delete account</h2>
+              </div>
+            </div>
+            <p>
+              Your profile, quiz and battle history, saved courses, progress, and notifications will
+              be removed. Unpublished quizzes will be archived; published shared quizzes and papers
+              may remain available without your account identity.
+            </p>
+            <form
+              className="form-stack profile-edit"
+              onSubmit={(event) => void handleDeleteAccount(event)}
+            >
+              <label>
+                <span>Current password</span>
+                <input
+                  type="password"
+                  name="current_password"
+                  required
+                  autoComplete="current-password"
+                />
+              </label>
+              <label>
+                <span>Type DELETE to confirm</span>
+                <input name="confirmation" required autoComplete="off" />
+              </label>
+              <Button type="submit" disabled={busy}>
+                {busy ? "Deleting…" : "Delete my account"}
+              </Button>
+            </form>
+          </section>
+        </div>
       );
       break;
     case "profile":
@@ -5427,6 +5688,18 @@ function App() {
                   ›
                 </span>
               </button>
+              <button onClick={() => navigate("settings")}>
+                <span className="profile-menu-icon" aria-hidden="true">
+                  ⚙
+                </span>
+                <span className="profile-menu-copy">
+                  <strong>Settings</strong>
+                  <small>Update your password, notification preference, or account</small>
+                </span>
+                <span className="profile-menu-arrow" aria-hidden="true">
+                  ›
+                </span>
+              </button>
               <button onClick={() => navigate("contribute")}>
                 <span className="profile-menu-icon" aria-hidden="true">
                   ↑
@@ -5579,13 +5852,21 @@ function App() {
           <div className="page-head compact">
             <span className="eyebrow">Account updates</span>
             <h1>Notifications.</h1>
-            {notifications.some((item) => !item.read_at) && (
-              <Button variant="secondary" disabled={busy} onClick={() => void handleMarkRead()}>
-                {busy ? "Saving…" : "Mark all as read"}
-              </Button>
-            )}
+            {user?.user_metadata.in_app_notifications_enabled !== false &&
+              notifications.some((item) => !item.read_at) && (
+                <Button variant="secondary" disabled={busy} onClick={() => void handleMarkRead()}>
+                  {busy ? "Saving…" : "Mark all as read"}
+                </Button>
+              )}
           </div>
-          {notifications.length ? (
+          {user?.user_metadata.in_app_notifications_enabled === false ? (
+            <section className="settings-card">
+              <p>In-app notifications are hidden in your settings.</p>
+              <Button variant="secondary" onClick={() => navigate("settings")}>
+                Open notification settings
+              </Button>
+            </section>
+          ) : notifications.length ? (
             <div className="activity-feed">
               {notifications.map((item) => (
                 <article
@@ -5647,6 +5928,11 @@ function App() {
           title={sourceToRead.title}
           watermark={user.email ?? profile?.full_name ?? "Rimbly user"}
           onClose={() => setSourceToRead(null)}
+          onUnlock={() => {
+            setSourceToRead(null);
+            navigate("subscription");
+          }}
+          onAccessResult={updateLibraryAccessStatus}
         />
       )}
     </>
@@ -8537,7 +8823,9 @@ function AdminQuizWorkspace({
                     : "Pending question sets"}
             </h2>
           </div>
-          <span>{quizzes.length} quizzes</span>
+          <span>
+            {quizzes.length} {quizzes.length === 1 ? "quiz" : "quizzes"}
+          </span>
         </div>
         {(canManage || (canReview && reviewingQuiz)) && (
           <p className="admin-quiz-guidance">
@@ -8977,7 +9265,7 @@ function AdminQuizWorkspace({
                   {[quiz.audience_university, quiz.audience_department, quiz.audience_level]
                     .filter(Boolean)
                     .join(" · ") || "No audience labels"}{" "}
-                  · Created by {quiz.creator_name}
+                  · Created by {quiz.created_by ? quiz.creator_name : "Former member"}
                 </small>
                 {quiz.replaces_quiz_id && (
                   <small className="field-note">
@@ -9772,6 +10060,11 @@ function BattlePage({
             ))}
           </select>
         </label>
+        {!quizId && (
+          <p className="field-note">
+            Choose a published quiz above to enable direct challenges and invite links.
+          </p>
+        )}
         <div className="battle-open-invite-action">
           <Button
             variant="secondary"
@@ -10100,6 +10393,7 @@ function PaperPage({
   onBattle,
   onUnlock,
   onBackToCourse,
+  onAccessResult,
 }: {
   paper: Paper;
   course: Course;
@@ -10110,6 +10404,7 @@ function PaperPage({
   onBattle: () => void;
   onUnlock: () => void;
   onBackToCourse: () => void;
+  onAccessResult: (result: LibraryDocumentAccessResult) => void;
 }) {
   const [access, setAccess] = useState<"checking" | "allowed" | "paywall" | "error">("checking");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -10123,6 +10418,7 @@ function PaperPage({
     void requestPastPaperAccess(paper.id)
       .then(async (result) => {
         if (!active) return;
+        onAccessResult(result);
         if (!result.allowed) {
           setAccess("paywall");
           return;
@@ -10144,7 +10440,7 @@ function PaperPage({
     return () => {
       active = false;
     };
-  }, [paper.id, paper.file_path]);
+  }, [onAccessResult, paper.id, paper.file_path]);
 
   return (
     <>
@@ -10238,7 +10534,11 @@ function PaperPage({
             />
           )
         ) : access === "paywall" ? (
-          <section className="library-paywall" role="alert" aria-labelledby="past-paper-paywall-title">
+          <section
+            className="library-paywall"
+            role="alert"
+            aria-labelledby="past-paper-paywall-title"
+          >
             <span className="badge badge-purple">Free allowance complete</span>
             <h2 id="past-paper-paywall-title">You’ve used all 3 free paper unlocks</h2>
             <p>
@@ -10305,32 +10605,52 @@ function SourceDocumentDialog({
   title,
   watermark,
   onClose,
+  onUnlock,
+  onAccessResult,
 }: {
   path: string;
   title: string;
   watermark: string;
   onClose: () => void;
+  onUnlock?: () => void;
+  onAccessResult?: (result: LibraryDocumentAccessResult) => void;
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paywall, setPaywall] = useState(false);
   useEffect(() => {
     let active = true;
     setSrc(null);
     setError(null);
-    void getPaperReaderUrl(path)
-      .then((url) => {
+    setPaywall(false);
+    void (async () => {
+      try {
+        const paperId = await getPastPaperIdByPath(path);
+        let url: string;
+        if (paperId) {
+          const access = await requestPastPaperAccess(paperId);
+          if (!active) return;
+          onAccessResult?.(access);
+          if (!access.allowed) {
+            setPaywall(true);
+            return;
+          }
+          url = await getPastPaperReaderUrl(paperId);
+        } else {
+          url = await getPaperReaderUrl(path);
+        }
         if (active) setSrc(url);
-      })
-      .catch((loadError: unknown) => {
+      } catch (loadError) {
         if (active)
           setError(
             loadError instanceof Error ? loadError.message : "Could not open the original source.",
           );
-      });
+      }
+    })();
     return () => {
       active = false;
     };
-  }, [path]);
+  }, [onAccessResult, path]);
 
   return (
     <div className="source-dialog-backdrop" role="presentation" onClick={onClose}>
@@ -10354,6 +10674,18 @@ function SourceDocumentDialog({
             isPdf={/\.pdf(?:$|[?#])/i.test(path)}
             watermark={watermark}
           />
+        ) : paywall ? (
+          <section className="library-paywall" role="alert" aria-labelledby="source-paywall-title">
+            <span className="badge badge-purple">Free allowance complete</span>
+            <h2 id="source-paywall-title">Unlock this past-paper source</h2>
+            <p>Your free past-paper unlocks are used. Pro opens every available paper.</p>
+            <div className="library-paywall-actions">
+              {onUnlock && <Button onClick={onUnlock}>See Pro options</Button>}
+              <Button variant="secondary" onClick={onClose}>
+                Maybe later
+              </Button>
+            </div>
+          </section>
         ) : (
           <p
             className={error ? "reader-error" : "reader-loading"}
@@ -10384,6 +10716,7 @@ function PdfDocumentViewer({
   const [pageCount, setPageCount] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [progressError, setProgressError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -10404,9 +10737,7 @@ function PdfDocumentViewer({
         if (active) setPage(Math.min(Math.max(progress.last_page, 1), pdf.numPages));
       } catch (loadError) {
         if (active) {
-          setError(
-            loadError instanceof Error ? loadError.message : "Could not load this PDF.",
-          );
+          setError(loadError instanceof Error ? loadError.message : "Could not load this PDF.");
         }
       } finally {
         if (active) setLoading(false);
@@ -10458,18 +10789,26 @@ function PdfDocumentViewer({
 
   useEffect(() => {
     if (loading || pageCount < 1) return;
+    let active = true;
+    setProgressError(null);
     const timeout = window.setTimeout(() => {
-      void savePastPaperProgress(documentId, page, pageCount).catch(() => undefined);
+      void savePastPaperProgress(documentId, page, pageCount).catch((saveError: unknown) => {
+        if (active) {
+          setProgressError(
+            saveError instanceof Error ? saveError.message : "Could not save reading progress.",
+          );
+        }
+      });
     }, 350);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
   }, [documentId, page, pageCount, loading]);
 
   useEffect(() => {
     const preventProtectedKeys = (event: KeyboardEvent) => {
-      if (
-        (event.ctrlKey || event.metaKey) &&
-        ["p", "s"].includes(event.key.toLowerCase())
-      ) {
+      if ((event.ctrlKey || event.metaKey) && ["p", "s"].includes(event.key.toLowerCase())) {
         event.preventDefault();
       }
     };
@@ -10511,6 +10850,11 @@ function PdfDocumentViewer({
       <div className="library-pdf-progress" aria-hidden="true">
         <span style={{ width: `${progress}%` }} />
       </div>
+      {progressError && (
+        <p className="reader-error" role="alert">
+          Could not save reading progress: {progressError}
+        </p>
+      )}
       {error ? (
         <p className="reader-error" role="alert">
           {error}
@@ -10677,6 +11021,7 @@ function ResultsPage({
   attempt,
   paper,
   isPro,
+  isAdmin,
   freePapersUsed,
   freePaperLimit,
   review,
@@ -10691,6 +11036,7 @@ function ResultsPage({
   attempt: QuizAttempt;
   paper?: Paper;
   isPro: boolean;
+  isAdmin: boolean;
   freePapersUsed: number;
   freePaperLimit: number;
   review: QuizAttemptReviewItem[];
@@ -10772,15 +11118,20 @@ function ResultsPage({
         <p>{nextStep}</p>
       </section>
       {attempt.score_percent >= 80 && paper && (
-        <section className="quiz-library-nudge" aria-label="Continue your progress with past papers">
+        <section
+          className="quiz-library-nudge"
+          aria-label="Continue your progress with past papers"
+        >
           <div>
             <span className="eyebrow">Keep your momentum</span>
             <h2>You’re ready to take on a real past paper.</h2>
             <p>
               You’ve built a strong foundation. Apply it to past exam sessions for this course.
-              {isPro
-                ? " Your Pro access includes every available paper."
-                : ` ${Math.max(0, freePaperLimit - freePapersUsed)} free paper unlocks remaining.`}
+              {isAdmin
+                ? " Your admin access includes every available paper."
+                : isPro
+                  ? " Your Pro access includes every available paper."
+                  : ` ${Math.max(0, freePaperLimit - freePapersUsed)} free paper unlocks remaining.`}
             </p>
           </div>
           <Button onClick={onReadPastPapers}>Explore past papers</Button>
@@ -10904,7 +11255,7 @@ function LeaderRow({ leader, rank, isMe }: { leader: Leader; rank: number; isMe:
         </strong>
         <small>
           {leader.university ?? "University not set"} · {leader.title || "Rookie"} ·{" "}
-          {leader.quizzes_completed} quizzes
+          {leader.quizzes_completed} {leader.quizzes_completed === 1 ? "quiz" : "quizzes"}
           {leader.current_win_streak ? ` · ${leader.current_win_streak} win streak` : ""}
         </small>
       </span>
@@ -11046,7 +11397,10 @@ function GameProgressPanel({
           <div className="game-progress-stats">
             <div>
               <strong>{progress.current_daily_streak} days</strong>
-              <small>Daily streak · best {progress.best_daily_streak} days</small>
+              <small>
+                Daily streak · best {progress.best_daily_streak}{" "}
+                {progress.best_daily_streak === 1 ? "day" : "days"}
+              </small>
             </div>
             <div>
               <strong>{progress.current_win_streak}</strong>
@@ -11118,7 +11472,7 @@ function GameProgressPanel({
                     <span aria-hidden="true">{definition.icon}</span>
                     <div>
                       <strong>
-                        {definition.name} {definition.category}
+                        {definition.name} · {definition.category === "frame" ? "Frame" : "Theme"}
                       </strong>
                       <small>{definition.description}</small>
                     </div>

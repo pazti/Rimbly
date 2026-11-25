@@ -30,6 +30,7 @@ as $$
 declare
   current_user_id uuid := auth.uid();
   active_pro boolean;
+  active_admin boolean;
   papers_used integer;
 begin
   if current_user_id is null or public.current_user_is_suspended() then
@@ -37,16 +38,19 @@ begin
   end if;
 
   active_pro := public.is_rimbly_pro_active(current_user_id);
+  active_admin := public.has_admin_permission('papers.manage')
+    or public.has_admin_permission('contributions.review');
   select count(*)::integer into papers_used
   from public.past_paper_access
   where user_id = current_user_id;
 
   return jsonb_build_object(
     'is_pro', active_pro,
+    'is_admin', active_admin,
     'documents_used', coalesce(papers_used, 0),
     'free_document_limit', 3,
     'documents_remaining', case
-      when active_pro then null
+      when active_pro or active_admin then null
       else greatest(0, 3 - coalesce(papers_used, 0))
     end
   );
@@ -62,6 +66,7 @@ as $$
 declare
   current_user_id uuid := auth.uid();
   active_pro boolean;
+  active_admin boolean;
   papers_used integer;
 begin
   if current_user_id is null or public.current_user_is_suspended() then
@@ -77,6 +82,22 @@ begin
 
   perform pg_advisory_xact_lock(hashtextextended(current_user_id::text, 3));
   active_pro := public.is_rimbly_pro_active(current_user_id);
+  active_admin := public.has_admin_permission('papers.manage')
+    or public.has_admin_permission('contributions.review');
+
+  if active_admin then
+    select count(*)::integer into papers_used
+    from public.past_paper_access
+    where user_id = current_user_id;
+    return jsonb_build_object(
+      'allowed', true,
+      'reason', 'admin',
+      'is_pro', active_pro,
+      'is_admin', true,
+      'documents_used', coalesce(papers_used, 0),
+      'free_document_limit', 3
+    );
+  end if;
 
   if exists (
     select 1
@@ -90,6 +111,7 @@ begin
       'allowed', true,
       'reason', 'previously_unlocked',
       'is_pro', active_pro,
+      'is_admin', false,
       'documents_used', papers_used,
       'free_document_limit', 3
     );
@@ -103,6 +125,7 @@ begin
       'allowed', true,
       'reason', 'pro',
       'is_pro', true,
+      'is_admin', false,
       'documents_used', coalesce(papers_used, 0),
       'free_document_limit', 3
     );
@@ -117,6 +140,7 @@ begin
       'allowed', false,
       'reason', 'free_limit_reached',
       'is_pro', false,
+      'is_admin', false,
       'documents_used', papers_used,
       'free_document_limit', 3
     );
@@ -130,6 +154,7 @@ begin
     'allowed', true,
     'reason', 'free_allowance',
     'is_pro', false,
+    'is_admin', false,
     'documents_used', papers_used,
     'free_document_limit', 3
   );
@@ -159,6 +184,7 @@ as $$
               and access.paper_id = paper.id
           )
           or public.has_admin_permission('papers.manage')
+          or public.has_admin_permission('contributions.review')
         )
     );
 $$;
@@ -189,6 +215,7 @@ begin
         where access.user_id = current_user_id and access.paper_id = paper.id
       )
       or public.has_admin_permission('papers.manage')
+      or public.has_admin_permission('contributions.review')
     );
   if paper_path is null then
     raise exception 'This past paper is not unlocked';
@@ -288,9 +315,13 @@ drop policy if exists "Approved past papers require an unlocked entitlement"
 create policy "Approved past papers require an unlocked entitlement"
   on storage.objects for select to authenticated
   using (
-    bucket_id <> 'contributions'
-    or owner_id = auth.uid()::text
-    or public.has_admin_permission('papers.manage')
-    or public.has_admin_permission('contributions.review')
-    or public.can_access_past_paper(name)
+    bucket_id = 'contributions'
+    and (
+      owner_id = auth.uid()::text
+      or public.has_admin_permission('papers.manage')
+      or public.has_admin_permission('contributions.review')
+      or public.can_access_past_paper(name)
+    )
   );
+
+notify pgrst, 'reload schema';

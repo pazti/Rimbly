@@ -11,7 +11,8 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    review, quiz attempts, one-on-one battles, points, streaks, titles, university
    leaderboards, and case-insensitive course-code uniqueness within each
    university. If the unique index detects existing duplicate course records,
-   merge their linked content before retrying the migration.
+   merge their linked content before retrying the migration. Then run
+   `polish-content-copy.sql` to correct the Frederick Taylor spelling in shared quizzes.
 5. Apply `quiz-audience-targeting.sql`, then `quiz-revisions.sql`, through the
    project's authorized Supabase migration workflow. These add optional university,
    department, and year-of-study labels without restricting access; allow paperless
@@ -52,17 +53,13 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    `past-paper-library-access.sql` to apply the three-past-paper
    free allowance, Pro-aware backend access checks, protected PDF.js viewing,
    and reading progress for the existing Past Questions library. Upload and
-   publish past papers through the existing Admin Past Questions workflow.
-   `quiz-learning-ux.sql` to enable secure, post-submission answer review, then
+   publish past papers through the existing Admin Past Questions workflow. Then
+   apply `quiz-learning-ux.sql` to enable secure, post-submission answer review, then
    apply `quiz-attempt-review.sql`. That migration requires at least 10 approved
    questions to publish a quiz, returns exactly 10 questions for each quiz, and
    limits answer reviews to questions included in that attempt. The Home daily-goal
    card also reads remaining allowance and today's completed practice from the
-   monetization status function. Library documents are not uploadable from the app
-   yet; add and publish records through the authorized server-side workflow only.
-   Library documents support signed streaming URLs, PDF.js in-app rendering,
-   server-checked entitlement, and per-user reading progress. Download and print
-   controls are omitted from the viewer.
+   monetization status function.
 8. Apply `harden-submission-workflows.sql` after `quiz-learning-ux.sql` and
    `quiz-attempt-review.sql`.
 9. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
@@ -75,7 +72,7 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    expire after seven days and can only be accepted by active students at the
    inviter's university; the feed shows only recent quiz titles and dates, never
    player names.
-10. Apply `learning-rewards.sql` last, after all other database migrations above.
+10. Apply `learning-rewards.sql` after all other database migrations above.
     It records daily and weekly mission completion, awards 20 XP for the first reviewed
     quiz each UTC day, 50 XP for studying on three days in a UTC week, and 30 XP for a
     weekly battle win. Approved study-resource contributions award 50 XP; an ambassador
@@ -91,14 +88,18 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
     Sundays in Africa/Lagos time after the transfer is complete. This migration does
     not initiate bank transfers. It also reconciles referrals with activation events
     already recorded before the ambassador reward trigger was installed.
-11. Deploy the two Supabase Edge Functions from the repository root:
+11. Apply `account-self-service.sql` after `quiz-battles.sql`,
+    `ambassador-program.sql`, and `learning-rewards.sql`. It preserves shared quizzes
+    and payout history while allowing account deletion to remove the user's identity.
+12. Deploy the Supabase Edge Functions from the repository root:
 
 ```sh
 supabase functions deploy admin-invite --project-ref YOUR_PROJECT_REF
 supabase functions deploy admin-student-access --project-ref YOUR_PROJECT_REF
+supabase functions deploy account-delete --project-ref YOUR_PROJECT_REF
 ```
 
-12. Configure the Supabase Edge Function secrets. Use the exact deployed app
+13. Configure the Supabase Edge Function secrets. Use the exact deployed app
     origin for `APP_URL` and keep these values in Supabase secrets:
 
 ```sh
@@ -108,12 +109,12 @@ supabase secrets set --project-ref YOUR_PROJECT_REF \
   SUPABASE_SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY"
 ```
 
-11. Set `GROQ_API_KEY` as an unprefixed Vercel project environment variable for
+14. Set `GROQ_API_KEY` as an unprefixed Vercel project environment variable for
     Development, Preview, and Production. The Vercel `/api/extract-quiz-questions`
     function reads it server-side. Optionally set `GROQ_MODEL`; it defaults to
     `qwen/qwen3.8-27b`.
 
-12. Configure the Vercel project environment for Development, Preview, and
+15. Configure the Vercel project environment for Development, Preview, and
     Production. The payment functions read `VITE_SUPABASE_URL` and
     `VITE_SUPABASE_ANON_KEY` as configured for the browser app.
     `SUPABASE_SERVICE_ROLE_KEY` and `SQUADCO_SECRET_KEY` must be unprefixed
@@ -131,14 +132,14 @@ supabase secrets set --project-ref YOUR_PROJECT_REF \
     deprecated; confirm the current endpoint and webhook contract with SquadCo
     before enabling production keys.
 
-13. Add the same app URL to Supabase Auth's allowed redirect URLs. Invitations
+16. Add the same app URL to Supabase Auth's allowed redirect URLs. Invitations
     redirect to `APP_URL/#/admin`. To remove the email-confirmation gate, open
     Supabase Dashboard → Authentication → Providers → Email and turn off
     **Confirm email**. The app already continues directly to profile setup when
     Supabase returns a session after signup. This hosted Auth setting cannot be
     changed from the repository; if it stays enabled, signups will still need to
     confirm and can use Guest Explore while waiting.
-14. Keep the existing Super Admin membership assigned explicitly to a trusted
+17. Keep the existing Super Admin membership assigned explicitly to a trusted
     user. Do not assign privileged roles from client-side profile metadata.
 
 The workspace provides the overview, contribution queue, direct paper upload,

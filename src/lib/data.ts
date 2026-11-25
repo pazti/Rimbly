@@ -106,7 +106,7 @@ export interface AdminQuizSet {
   audience_department: string | null;
   audience_level: string | null;
   status: "draft" | "pending_review" | "needs_revision" | "published" | "archived";
-  created_by: string;
+  created_by: string | null;
   creator_name: string;
 }
 
@@ -188,15 +188,17 @@ export interface RimblyBillingStatus {
 
 export interface LibraryAccessStatus {
   is_pro: boolean;
+  is_admin: boolean;
   documents_used: number;
   free_document_limit: number;
-  documents_remaining: number;
+  documents_remaining: number | null;
 }
 
 export interface LibraryDocumentAccessResult {
   allowed: boolean;
-  reason: "previously_unlocked" | "pro" | "free_allowance" | "free_limit_reached";
+  reason: "previously_unlocked" | "pro" | "admin" | "free_allowance" | "free_limit_reached";
   is_pro: boolean;
+  is_admin: boolean;
   documents_used: number;
   free_document_limit: number;
 }
@@ -631,6 +633,18 @@ export async function getPapers(courseId?: string) {
   return (data ?? []) as Paper[];
 }
 
+export async function getPastPaperIdByPath(path: string) {
+  const { data, error } = await requireSupabase()
+    .from("papers")
+    .select("id")
+    .eq("file_path", path)
+    .eq("status", "approved")
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { id: string } | null)?.id ?? null;
+}
+
 export async function getPaperReaderUrl(path: string) {
   const { data, error } = await requireSupabase()
     .storage.from("contributions")
@@ -663,9 +677,7 @@ export async function getPastPaperReaderUrl(paperId: string) {
   });
   if (pathError) throw pathError;
   if (typeof path !== "string") throw new Error("Could not resolve the past-paper document.");
-  const { data, error } = await client
-    .storage.from("contributions")
-    .createSignedUrl(path, 600);
+  const { data, error } = await client.storage.from("contributions").createSignedUrl(path, 600);
   if (error) throw error;
   return data.signedUrl;
 }
@@ -678,11 +690,7 @@ export async function getPastPaperProgress(paperId: string) {
   return data as LibraryDocumentProgress;
 }
 
-export async function savePastPaperProgress(
-  paperId: string,
-  lastPage: number,
-  pageCount: number,
-) {
+export async function savePastPaperProgress(paperId: string, lastPage: number, pageCount: number) {
   const { data, error } = await requireSupabase().rpc("save_past_paper_progress", {
     p_paper_id: paperId,
     p_last_page: lastPage,
@@ -1444,6 +1452,19 @@ export async function markNotificationsRead(userId: string) {
     .eq("user_id", userId)
     .is("read_at", null);
   if (error) throw error;
+}
+
+export async function deleteOwnAccount() {
+  const { data, error } = await requireSupabase().functions.invoke("account-delete");
+  if (error) {
+    if (error.context instanceof Response) {
+      const payload = (await error.context.clone().json()) as { error?: unknown };
+      if (typeof payload.error === "string") throw new Error(payload.error);
+    }
+    throw error;
+  }
+  if (data?.error) throw new Error(data.error);
+  if (data?.deleted !== true) throw new Error("The account deletion request was not completed.");
 }
 
 export async function getContributions(userId: string) {
