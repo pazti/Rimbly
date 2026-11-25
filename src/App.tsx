@@ -4921,6 +4921,29 @@ function App() {
                 <h2>Past papers</h2>
               </div>
             </div>
+            {matchingPapers.length > 0 && (
+              <section className="course-library-nudge" aria-label="Past-paper library access">
+                <div>
+                  <span className="eyebrow">Take the next step</span>
+                  <strong>
+                    {matchingPapers.length} real exam{" "}
+                    {matchingPapers.length === 1 ? "paper" : "papers"} for this course
+                  </strong>
+                  <p>
+                    {libraryAccessStatus?.is_pro
+                      ? "Your Pro plan opens every available session."
+                      : libraryAccessStatus
+                        ? `${Math.max(0, libraryAccessStatus.free_document_limit - libraryAccessStatus.documents_used)} free unlocks left. Pro opens every available session.`
+                        : "Your first 3 paper unlocks are free. Pro opens every available session."}
+                  </p>
+                </div>
+                {!libraryAccessStatus?.is_pro && (
+                  <Button variant="secondary" onClick={() => navigate("subscription")}>
+                    Explore Pro
+                  </Button>
+                )}
+              </section>
+            )}
             {matchingPapers.length ? (
               <div className="course-list">
                 {matchingPapers.map((paper) => (
@@ -4977,6 +5000,7 @@ function App() {
             }
             onBattle={() => navigate("battle")}
             onUnlock={() => navigate("subscription")}
+            onBackToCourse={() => navigate("course")}
           />
         ) : (
           <EmptyState
@@ -5029,12 +5053,24 @@ function App() {
         <ResultsPage
           attempt={lastAttempt}
           paper={papers.find((paper) => paper.id === lastAttempt.paper_id)}
+          isPro={Boolean(billingStatus?.is_pro)}
+          freePapersUsed={libraryAccessStatus?.documents_used ?? 0}
+          freePaperLimit={libraryAccessStatus?.free_document_limit ?? 3}
           review={lastAttemptReview}
           reviewLoading={lastAttemptReviewLoading}
           reviewError={lastAttemptReviewError}
           onRetry={() => void handleStartQuiz(lastAttempt.quiz_id ?? activeQuizSetId ?? undefined)}
           onBrowse={() => navigate("quiz-setup")}
           onHistory={() => navigate("quiz-history")}
+          onReadPastPapers={() => {
+            const attemptPaper = papers.find((paper) => paper.id === lastAttempt.paper_id);
+            if (attemptPaper) {
+              setSelectedCourseId(attemptPaper.course_id);
+              navigate("course");
+            } else {
+              navigate("practice");
+            }
+          }}
           onAmbassador={startAmbassadorFlow}
         />
       ) : (
@@ -10063,6 +10099,7 @@ function PaperPage({
   onQuiz,
   onBattle,
   onUnlock,
+  onBackToCourse,
 }: {
   paper: Paper;
   course: Course;
@@ -10072,6 +10109,7 @@ function PaperPage({
   onQuiz: () => void;
   onBattle: () => void;
   onUnlock: () => void;
+  onBackToCourse: () => void;
 }) {
   const [access, setAccess] = useState<"checking" | "allowed" | "paywall" | "error">("checking");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -10201,10 +10239,23 @@ function PaperPage({
           )
         ) : access === "paywall" ? (
           <section className="library-paywall" role="alert" aria-labelledby="past-paper-paywall-title">
-            <span className="badge badge-purple">Free allowance used</span>
-            <h2 id="past-paper-paywall-title">Unlock the full past-question library with Pro</h2>
-            <p>You have used all 3 free past-paper unlocks.</p>
-            <Button onClick={onUnlock}>Unlock with Pro</Button>
+            <span className="badge badge-purple">Free allowance complete</span>
+            <h2 id="past-paper-paywall-title">You’ve used all 3 free paper unlocks</h2>
+            <p>
+              Keep your study momentum going. Pro opens every available past-paper session for this
+              course, with no automatic renewal.
+            </p>
+            <ul>
+              <li>Access every published past paper</li>
+              <li>Keep reading progress across your study sessions</li>
+              <li>Choose the plan length that fits your exam schedule</li>
+            </ul>
+            <div className="library-paywall-actions">
+              <Button onClick={onUnlock}>See Pro options</Button>
+              <Button variant="secondary" onClick={onBackToCourse}>
+                Maybe later
+              </Button>
+            </div>
           </section>
         ) : (
           <p
@@ -10625,22 +10676,30 @@ function QuizPage({
 function ResultsPage({
   attempt,
   paper,
+  isPro,
+  freePapersUsed,
+  freePaperLimit,
   review,
   reviewLoading,
   reviewError,
   onRetry,
   onBrowse,
   onHistory,
+  onReadPastPapers,
   onAmbassador,
 }: {
   attempt: QuizAttempt;
   paper?: Paper;
+  isPro: boolean;
+  freePapersUsed: number;
+  freePaperLimit: number;
   review: QuizAttemptReviewItem[];
   reviewLoading: boolean;
   reviewError: string | null;
   onRetry: () => void;
   onBrowse: () => void;
   onHistory: () => void;
+  onReadPastPapers: () => void;
   onAmbassador: () => void;
 }) {
   const nextStep =
@@ -10712,6 +10771,21 @@ function ResultsPage({
         <span className="eyebrow">Your next step</span>
         <p>{nextStep}</p>
       </section>
+      {attempt.score_percent >= 80 && paper && (
+        <section className="quiz-library-nudge" aria-label="Continue your progress with past papers">
+          <div>
+            <span className="eyebrow">Keep your momentum</span>
+            <h2>You’re ready to take on a real past paper.</h2>
+            <p>
+              You’ve built a strong foundation. Apply it to past exam sessions for this course.
+              {isPro
+                ? " Your Pro access includes every available paper."
+                : ` ${Math.max(0, freePaperLimit - freePapersUsed)} free paper unlocks remaining.`}
+            </p>
+          </div>
+          <Button onClick={onReadPastPapers}>Explore past papers</Button>
+        </section>
+      )}
       <section className="quiz-ambassador-prompt">
         <div>
           <span className="eyebrow">Help your course mates</span>
