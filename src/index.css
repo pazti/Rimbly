@@ -4382,7 +4382,7 @@ select {
   line-height: 0.88;
 }
 .auth-art h1 em {
-  color: var(--amber);
+  color: #ffe08a;
   font-style: normal;
 }
 .auth-art p {
@@ -4468,6 +4468,20 @@ select {
   font-size: 7px;
   line-height: 1.5;
   text-align: center;
+}
+@media (max-width: 420px) {
+  .auth-art {
+    min-height: 500px;
+  }
+  .auth-art > div:last-child {
+    margin-top: 140px;
+  }
+  .welcome-emblem {
+    top: 82px;
+    right: 20px;
+    width: 96px;
+    height: 96px;
+  }
 }
 .guest-explore-link {
   min-height: 44px;
