@@ -117,20 +117,20 @@ supabase secrets set --project-ref YOUR_PROJECT_REF \
 15. Configure the Vercel project environment for Development, Preview, and
     Production. The payment functions read `VITE_SUPABASE_URL` and
     `VITE_SUPABASE_ANON_KEY` as configured for the browser app.
-    `SUPABASE_SERVICE_ROLE_KEY` and `SQUADCO_SECRET_KEY` must be unprefixed
-    server-only variables and must never use a `VITE_` prefix.
-    Start with `SQUADCO_MODE=sandbox`; use `production` only after testing with
-    live SquadCo keys. Set `APP_URL` to the exact deployed app origin.
+    `SUPABASE_SERVICE_ROLE_KEY`, `FLW_SECRET_KEY`, and `FLW_SECRET_HASH` must be
+    unprefixed server-only variables and must never use a `VITE_` prefix. Use
+    Flutterwave test-mode keys first, then switch to live keys only after testing.
+    Set `FLW_SECRET_HASH` to the webhook secret hash configured in the Flutterwave
+    dashboard, and set `APP_URL` to the exact deployed app origin.
 
-    The hosted checkout endpoint is `/api/squadco/checkout`. Configure that
-    same app's SquadCo webhook URL as `/api/squadco/webhook`. The webhook
-    validates SquadCo's HMAC-SHA512 signature and then verifies the transaction
-    with SquadCo before activating Pro. Checkout stays unavailable until these
-    server variables and the migration are in place. Do not send card details
-    through Rimbly or treat the browser redirect as proof of payment.
-    SquadCo marks its publicly accessible legacy API documentation as
-    deprecated; confirm the current endpoint and webhook contract with SquadCo
-    before enabling production keys.
+    The hosted checkout endpoint is `/api/flutterwave/checkout`. Configure that
+    same app's Flutterwave webhook URL as `/api/flutterwave/webhook`, enable
+    `charge.completed` notifications and webhook retries, and use the same secret
+    hash in the dashboard and `FLW_SECRET_HASH`. The webhook verifies its signature
+    and independently verifies each transaction with Flutterwave before activating
+    Pro. Checkout stays unavailable until these server variables and the migration
+    are in place. Do not send card details through Rimbly or treat the browser
+    redirect as proof of payment.
 
 16. Add the same app URL to Supabase Auth's allowed redirect URLs. Invitations
     redirect to `APP_URL/#/admin`. To remove the email-confirmation gate, open

@@ -2611,7 +2611,7 @@ function SubscriptionPage({
                 ? "Your plan is active. Welcome to Pro."
                 : paymentFailed
                   ? "You have not been charged for an unsuccessful payment. You can try again."
-                  : "Access starts only after SquadCo verifies the payment. This can take a moment."}
+                  : "Access starts only after Flutterwave verifies the payment. This can take a moment."}
             </p>
           </div>
           {!paymentPaid && (
@@ -2696,7 +2696,7 @@ function SubscriptionPage({
           ))}
         </div>
         <p className="billing-disclaimer">
-          One-time payment per term. No automatic renewals. Checkout is hosted by SquadCo.
+          One-time payment per term. No automatic renewals. Checkout is hosted by Flutterwave.
         </p>
       </section>
 
@@ -3100,7 +3100,7 @@ function App() {
       () => undefined,
     );
     try {
-      const response = await fetch("/api/squadco/checkout", {
+      const response = await fetch("/api/flutterwave/checkout", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -3124,11 +3124,11 @@ function App() {
       }
       if (!response.ok) {
         throw new Error(
-          typeof result.error === "string" ? result.error : "Could not start SquadCo checkout.",
+          typeof result.error === "string" ? result.error : "Could not start Flutterwave checkout.",
         );
       }
       if (typeof result.checkoutUrl !== "string") {
-        throw new Error("SquadCo returned an invalid checkout link.");
+        throw new Error("Flutterwave returned an invalid checkout link.");
       }
       window.location.assign(result.checkoutUrl);
     } catch (checkoutError) {

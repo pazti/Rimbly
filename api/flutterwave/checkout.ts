@@ -38,20 +38,8 @@ export default async function handler(request: CheckoutRequest, response: Server
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const secretKey = process.env.SQUADCO_SECRET_KEY;
+  const secretKey = process.env.FLW_SECRET_KEY;
   const appUrl = process.env.APP_URL;
-  const configuredMode = process.env.SQUADCO_MODE?.trim().toLowerCase();
-  const mode =
-    configuredMode === "production" || configuredMode === "prod" || configuredMode === "live"
-      ? "production"
-      : configuredMode === "sandbox" ||
-          configuredMode === "test" ||
-          configuredMode === "development" ||
-          configuredMode === "dev"
-        ? "sandbox"
-        : process.env.VERCEL_ENV === "production"
-          ? "production"
-          : "sandbox";
   if (!supabaseUrl || !anonKey || !serviceRoleKey || !appUrl) {
     return respond(response, 503, {
       error: "Billing is not configured yet. Ask an administrator to finish the server setup.",
@@ -59,7 +47,7 @@ export default async function handler(request: CheckoutRequest, response: Server
   }
   if (!secretKey) {
     return respond(response, 503, {
-      error: "SquadCo checkout is not enabled yet. The payment keys have not been added.",
+      error: "Flutterwave checkout is not enabled yet. The payment keys have not been added.",
     });
   }
   let callbackUrl: URL;
@@ -124,65 +112,71 @@ export default async function handler(request: CheckoutRequest, response: Server
 
   const checkoutUrl = new URL("/?route=subscription", callbackUrl);
   checkoutUrl.searchParams.set("payment", transactionRef);
-  const apiBase =
-    mode === "production" ? "https://api-d.squadco.com" : "https://sandbox-api-d.squadco.com";
+  const customerName =
+    typeof authData.user.user_metadata.full_name === "string"
+      ? authData.user.user_metadata.full_name
+      : undefined;
   let gatewayResponse: Response;
   try {
-    gatewayResponse = await fetch(`${apiBase}/transaction/initiate`, {
+    gatewayResponse = await fetch("https://api.flutterwave.com/v3/payments", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${secretKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        email: authData.user.email,
-        amount: Number(amountKobo),
+        tx_ref: transactionRef,
+        amount: String(Number(amountKobo) / 100),
         currency: "NGN",
-        initiate_type: "inline",
-        transaction_ref: transactionRef,
-        customer_name:
-          typeof authData.user.user_metadata.full_name === "string"
-            ? authData.user.user_metadata.full_name
-            : undefined,
-        callback_url: checkoutUrl.toString(),
-        payment_channels: ["card", "bank", "ussd", "transfer"],
-        metadata: { product: "rimbly_pro", plan_id: plan.id, user_id: authData.user.id },
-        pass_charge: false,
+        redirect_url: checkoutUrl.toString(),
+        customer: {
+          email: authData.user.email,
+          ...(customerName ? { name: customerName } : {}),
+        },
+        customizations: {
+          title: "Rimbly Pro",
+          description: `${plan.id} Rimbly Pro plan`,
+        },
+        meta: { product: "rimbly_pro", plan_id: plan.id, user_id: authData.user.id },
       }),
     });
   } catch (gatewayError) {
     const message = gatewayError instanceof Error ? gatewayError.message : "Network error";
-    console.error("SquadCo checkout request failed:", message);
+    console.error("Flutterwave checkout request failed:", message);
     const { error: updateError } = await serviceClient
       .from("rimbly_billing_payments")
       .update({ status: "failed" })
       .eq("transaction_ref", transactionRef);
     if (updateError) {
-      console.error("Could not mark failed SquadCo checkout:", updateError.message);
+      console.error("Could not mark failed Flutterwave checkout:", updateError.message);
     }
-    return respond(response, 502, { error: "Could not connect to SquadCo. Please try again." });
+    return respond(response, 502, {
+      error: "Could not connect to Flutterwave. Please try again.",
+    });
   }
 
   const responseBody = (await gatewayResponse.json().catch(() => null)) as {
-    data?: { checkout_url?: unknown };
+    status?: unknown;
+    data?: { link?: unknown };
     message?: string;
   } | null;
   let hostedUrl: URL | null = null;
-  if (typeof responseBody?.data?.checkout_url === "string") {
+  if (typeof responseBody?.data?.link === "string") {
     try {
-      hostedUrl = new URL(responseBody.data.checkout_url);
+      hostedUrl = new URL(responseBody.data.link);
     } catch {
       hostedUrl = null;
     }
   }
   if (
     !gatewayResponse.ok ||
+    responseBody?.status !== "success" ||
     !hostedUrl ||
     hostedUrl.protocol !== "https:" ||
-    !hostedUrl.hostname.endsWith(".squadco.com")
+    hostedUrl.hostname !== "checkout.flutterwave.com"
   ) {
     console.error(
-      "SquadCo rejected checkout initialization:",
+      "Flutterwave rejected checkout initialization:",
       responseBody?.message ?? "Invalid response",
     );
     const { error: updateError } = await serviceClient
@@ -190,10 +184,10 @@ export default async function handler(request: CheckoutRequest, response: Server
       .update({ status: "failed" })
       .eq("transaction_ref", transactionRef);
     if (updateError) {
-      console.error("Could not mark rejected SquadCo checkout:", updateError.message);
+      console.error("Could not mark rejected Flutterwave checkout:", updateError.message);
     }
     return respond(response, 502, {
-      error: "SquadCo could not start this payment. Please try again.",
+      error: "Flutterwave could not start this payment. Please try again.",
     });
   }
 
