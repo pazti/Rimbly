@@ -46,10 +46,13 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    Referral attribution is stored in `ambassador_referrals`, not on `profiles`.
 7. Apply `monetization.sql` after `gamification.sql`. It adds server-managed
    Rimbly Pro subscriptions and payment records, a Pro flair on leaderboards,
-   five free quiz submissions and three free battle invites per UTC day, and
-   usage/status reporting. The limits are enforced in database triggers, not
-   only by the UI. Weekly, monthly, and semester payments grant 7 days, 1 month,
-   and 4 months respectively; plans do not auto-renew. Then apply
+   three free quiz submissions per UTC week and three free battle invites per
+   UTC day, and usage/status reporting. The quiz and battle limits are enforced
+   in database triggers, not only by the UI. Apply `billing-status-rpc-json.sql`
+   after `monetization.sql`, then apply `free-weekly-quiz-limit.sql` after both
+   scripts to update existing installations. Weekly quizzes reset Monday at
+   00:00 UTC. Weekly, monthly, and semester payments grant 7 days, 1 month, and
+   4 months respectively; plans do not auto-renew. Then apply
    `past-paper-library-access.sql` to apply the three-past-paper
    free allowance, Pro-aware backend access checks, protected PDF.js viewing,
    and reading progress for the existing Past Questions library. Upload and
@@ -58,8 +61,8 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    apply `quiz-attempt-review.sql`. That migration requires at least 10 approved
    questions to publish a quiz, returns exactly 10 questions for each quiz, and
    limits answer reviews to questions included in that attempt. The Home daily-goal
-   card also reads remaining allowance and today's completed practice from the
-   monetization status function.
+   card also reads the weekly quiz allowance, daily battle allowance, and
+   today's completed practice from the monetization status function.
 8. Apply `harden-submission-workflows.sql` after `quiz-learning-ux.sql` and
    `quiz-attempt-review.sql`.
 9. Run `maintenance-mode.sql` to enable the scheduled maintenance page and

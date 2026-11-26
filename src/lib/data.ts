@@ -178,6 +178,9 @@ export interface RimblyBillingStatus {
   expires_at: string | null;
   quizzes_used_today: number;
   free_quiz_limit: number;
+  quizzes_used_this_week: number;
+  free_quiz_weekly_limit: number;
+  quiz_week_resets_at: string;
   battle_invites_used_today: number;
   free_battle_limit: number;
   completed_battles_today: number;

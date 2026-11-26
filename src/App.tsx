@@ -1692,8 +1692,13 @@ function DailyGoalCard({
 
   const didPractice = status?.did_practice_today ?? false;
   const quizRemaining = status
-    ? Math.max(0, status.free_quiz_limit - status.quizzes_used_today)
+    ? Math.max(0, status.free_quiz_weekly_limit - status.quizzes_used_this_week)
     : null;
+  const weeklyQuizLimitReached = Boolean(
+    status &&
+      !status.is_pro &&
+      status.quizzes_used_this_week >= status.free_quiz_weekly_limit,
+  );
   const battleRemaining = status
     ? Math.max(0, status.free_battle_limit - status.battle_invites_used_today)
     : null;
@@ -1701,6 +1706,21 @@ function DailyGoalCard({
   nextReset.setUTCHours(24, 0, 0, 0);
   const minutesUntilReset = Math.max(0, Math.ceil((nextReset.getTime() - now) / 60_000));
   const resetTime = `${Math.floor(minutesUntilReset / 60)}h ${minutesUntilReset % 60}m`;
+  const weeklyResetTimestamp = Date.parse(status?.quiz_week_resets_at ?? "");
+  const nextQuizReset = Number.isFinite(weeklyResetTimestamp)
+    ? weeklyResetTimestamp
+    : (() => {
+        const nextMonday = new Date(now);
+        const daysUntilMonday = (8 - nextMonday.getUTCDay()) % 7 || 7;
+        nextMonday.setUTCDate(nextMonday.getUTCDate() + daysUntilMonday);
+        nextMonday.setUTCHours(0, 0, 0, 0);
+        return nextMonday.getTime();
+      })();
+  const quizMinutesUntilReset = Math.max(0, Math.ceil((nextQuizReset - now) / 60_000));
+  const quizResetTime =
+    quizMinutesUntilReset >= 24 * 60
+      ? `${Math.floor(quizMinutesUntilReset / (24 * 60))}d ${Math.floor((quizMinutesUntilReset % (24 * 60)) / 60)}h`
+      : `${Math.floor(quizMinutesUntilReset / 60)}h ${quizMinutesUntilReset % 60}m`;
   const isEvening = new Date(now).getHours() >= 18;
   const isProtectingStreak = (progress?.current_daily_streak ?? 0) > 0;
   const nextMilestone = [3, 7, 14, 30].find(
@@ -1788,39 +1808,45 @@ function DailyGoalCard({
         </div>
       )}
       <div className="daily-goal-footer">
-        <div className="daily-goal-allowances" aria-label="Today's free allowances">
+        <div className="daily-goal-allowances" aria-label="Free quiz and battle allowances">
           {loading ? (
             <span className="daily-goal-usage" role="status">
-              Loading today’s allowance…
+              Loading free allowances…
             </span>
           ) : status ? (
             <>
               <span className="daily-goal-usage">
                 {status.is_pro
-                  ? `Quizzes: ${status.quizzes_used_today} used today`
-                  : `Quizzes: ${status.quizzes_used_today}/${status.free_quiz_limit} used · ${quizRemaining} left`}
+                  ? `Quizzes: ${status.quizzes_used_this_week} this week`
+                  : `Quizzes: ${status.quizzes_used_this_week}/${status.free_quiz_weekly_limit} this week · ${quizRemaining} left`}
               </span>
               <span className="daily-goal-usage">
                 {status.is_pro
                   ? `Battles: ${status.battle_invites_used_today} invites today`
                   : `Battles: ${status.battle_invites_used_today}/${status.free_battle_limit} invites · ${battleRemaining} left`}
               </span>
-              <span className="daily-goal-usage daily-goal-reset">Resets in {resetTime} UTC</span>
+              <span className="daily-goal-usage daily-goal-reset">
+                {status.is_pro
+                  ? `Battle invites reset in ${resetTime}`
+                  : `Quiz limit resets in ${quizResetTime} UTC · battle invites reset in ${resetTime}`}
+              </span>
             </>
           ) : (
             <button type="button" className="daily-goal-usage-link" onClick={onPlans}>
-              {error ? "Usage unavailable · Check plans" : "See your daily limits"}
+              {error ? "Usage unavailable · Check plans" : "See your weekly quiz limits"}
             </button>
           )}
         </div>
         {showAction && (
           <div className="daily-goal-actions">
-            <Button onClick={onQuiz}>
-              {didPractice
-                ? "Take another quiz"
-                : hasQuiz
-                  ? "Start today’s quiz"
-                  : "Browse quizzes"}
+            <Button onClick={weeklyQuizLimitReached ? onPlans : onQuiz}>
+              {weeklyQuizLimitReached
+                ? "Get unlimited quizzes"
+                : didPractice
+                  ? "Take another quiz"
+                  : hasQuiz
+                    ? "Start today’s quiz"
+                    : "Browse quizzes"}
             </Button>
           </div>
         )}
@@ -2654,9 +2680,9 @@ function SubscriptionPage({
         </div>
         <div className="billing-usage-grid">
           <UsageMeter
-            label="Quiz submissions"
-            used={status?.quizzes_used_today ?? 0}
-            limit={status?.free_quiz_limit ?? 5}
+            label="Quiz submissions this week"
+            used={status?.quizzes_used_this_week ?? 0}
+            limit={status?.free_quiz_weekly_limit ?? 3}
             unlimited={Boolean(status?.is_pro)}
           />
           <UsageMeter
@@ -4119,6 +4145,17 @@ function App() {
       setError("Choose a quiz with approved structured questions.");
       return;
     }
+    if (
+      billingStatus &&
+      !billingStatus.is_pro &&
+      billingStatus.quizzes_used_this_week >= billingStatus.free_quiz_weekly_limit
+    ) {
+      setError(
+        "You’ve used all three free quizzes for this UTC week. Your free quizzes reset Monday at 00:00 UTC. Upgrade to Rimbly Pro for unlimited quizzes.",
+      );
+      void refreshRimblyBillingStatus();
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -4218,7 +4255,15 @@ function App() {
         );
       }
     } catch (quizError) {
-      setError(quizError instanceof Error ? quizError.message : "Could not save your quiz.");
+      const message = getErrorMessage(quizError, "Could not save your quiz.");
+      if (message.includes("FREE_QUIZ_WEEKLY_LIMIT")) {
+        setError(
+          "You’ve used all three free quizzes for this UTC week. Your free quizzes reset Monday at 00:00 UTC. Upgrade to Rimbly Pro for unlimited quizzes.",
+        );
+        void refreshRimblyBillingStatus();
+      } else {
+        setError(message);
+      }
     } finally {
       quizSubmissionLockRef.current = false;
       setBusy(false);

@@ -74,9 +74,11 @@ as $$
 declare
   current_user_id uuid := auth.uid();
   utc_day_start timestamptz := date_trunc('day', now() at time zone 'UTC') at time zone 'UTC';
+  utc_week_start timestamptz := date_trunc('week', now() at time zone 'UTC') at time zone 'UTC';
   subscription public.rimbly_subscriptions%rowtype;
   latest_payment public.rimbly_billing_payments%rowtype;
   quiz_count integer;
+  quiz_week_count integer;
   battle_count integer;
   completed_battles_today integer;
   active_pro boolean;
@@ -105,6 +107,17 @@ begin
     where attempt.user_id = current_user_id and attempt.created_at >= utc_day_start
   ) attempts;
 
+  select count(*)::integer into quiz_week_count
+  from (
+    select attempt.id
+    from public.quiz_set_attempts attempt
+    where attempt.user_id = current_user_id and attempt.created_at >= utc_week_start
+    union all
+    select attempt.id
+    from public.quiz_attempts attempt
+    where attempt.user_id = current_user_id and attempt.created_at >= utc_week_start
+  ) attempts;
+
   select count(*)::integer into battle_count
   from public.battle_challenges challenge
   where challenge.challenger_id = current_user_id
@@ -126,10 +139,10 @@ begin
     'plan_id', case when active_pro then subscription.plan_id else 'free' end,
     'expires_at', case when active_pro then subscription.expires_at else null end,
     'quizzes_used_today', coalesce(quiz_count, 0),
-    'free_quiz_limit', case
-      when coalesce(quiz_count, 0) > 0 or coalesce(completed_battles_today, 0) > 0 then 6
-      else 5
-    end,
+    'free_quiz_limit', 3,
+    'quizzes_used_this_week', coalesce(quiz_week_count, 0),
+    'free_quiz_weekly_limit', 3,
+    'quiz_week_resets_at', utc_week_start + interval '1 week',
     'battle_invites_used_today', coalesce(battle_count, 0),
     'free_battle_limit', 3,
     'completed_battles_today', coalesce(completed_battles_today, 0),
@@ -297,9 +310,8 @@ security definer
 set search_path = pg_catalog, public
 as $$
 declare
-  utc_day_start timestamptz := date_trunc('day', now() at time zone 'UTC') at time zone 'UTC';
+  utc_week_start timestamptz := date_trunc('week', now() at time zone 'UTC') at time zone 'UTC';
   quiz_count integer;
-  quiz_limit integer := 5;
 begin
   if auth.role() is distinct from 'service_role'
     and auth.uid() is distinct from new.user_id then
@@ -310,28 +322,20 @@ begin
     return new;
   end if;
 
-  if exists (
-    select 1 from public.player_game_stats stats
-    where stats.user_id = new.user_id
-      and stats.last_activity_date = (now() at time zone 'UTC')::date
-  ) then
-    quiz_limit := 6;
-  end if;
-
   perform pg_advisory_xact_lock(hashtextextended(new.user_id::text, 0));
   select count(*)::integer into quiz_count
   from (
     select attempt.id
     from public.quiz_set_attempts attempt
-    where attempt.user_id = new.user_id and attempt.created_at >= utc_day_start
+    where attempt.user_id = new.user_id and attempt.created_at >= utc_week_start
     union all
     select attempt.id
     from public.quiz_attempts attempt
-    where attempt.user_id = new.user_id and attempt.created_at >= utc_day_start
+    where attempt.user_id = new.user_id and attempt.created_at >= utc_week_start
   ) attempts;
 
-  if quiz_count >= quiz_limit then
-    raise exception 'FREE_QUIZ_DAILY_LIMIT: Free accounts can submit five quizzes per UTC day, plus one bonus quiz after completing the daily goal. Try again tomorrow or upgrade to Rimbly Pro.';
+  if quiz_count >= 3 then
+    raise exception 'FREE_QUIZ_WEEKLY_LIMIT: Free accounts can submit three quizzes per UTC week. The limit resets Monday at 00:00 UTC. Upgrade to Rimbly Pro for unlimited quiz submissions.';
   end if;
   return new;
 end;
