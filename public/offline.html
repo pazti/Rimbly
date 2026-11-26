@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f6fa" />
+    <title>You're offline · Rimbly</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #202638;
+        background: #f5f6fa;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-width: 320px;
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        margin: 0;
+        padding: 24px;
+        background:
+          radial-gradient(ellipse at 50% 0, rgb(104 64 197 / 7%), transparent 40%), #f5f6fa;
+      }
+
+      main {
+        width: min(100%, 440px);
+        display: grid;
+        justify-items: start;
+        gap: 16px;
+        padding: clamp(24px, 6vw, 40px);
+        border: 1px solid #e2e6ef;
+        border-radius: 22px;
+        background: #fff;
+        box-shadow: 0 12px 30px rgb(32 38 56 / 8%);
+      }
+
+      .mark {
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        border: 2px solid #202638;
+        border-radius: 12px;
+        background: #6840c5;
+        box-shadow: 3px 3px 0 #202638;
+        color: #fff;
+        font:
+          900 23px ui-rounded,
+          system-ui,
+          sans-serif;
+      }
+
+      .eyebrow {
+        color: #6840c5;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(34px, 8vw, 46px);
+        letter-spacing: -0.05em;
+        line-height: 1.05;
+      }
+
+      p {
+        margin: 0;
+        color: #657084;
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .status span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #d78a29;
+        box-shadow: 0 0 0 4px rgb(215 138 41 / 12%);
+      }
+
+      button {
+        width: 100%;
+        min-height: 46px;
+        border: 2px solid #202638;
+        border-radius: 11px;
+        background: #6840c5;
+        box-shadow: 0 12px 30px rgb(32 38 56 / 8%);
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 800;
+        transition:
+          transform 150ms ease,
+          box-shadow 150ms ease,
+          background-color 150ms ease;
+      }
+
+      button:hover {
+        transform: translate(-1px, -1px);
+        background: #5233a4;
+        box-shadow: 4px 4px 0 #202638;
+      }
+
+      button:focus-visible {
+        outline: 3px solid rgb(104 64 197 / 40%);
+        outline-offset: 3px;
+      }
+
+      #message {
+        min-height: 20px;
+        font-size: 12px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main aria-labelledby="offline-title">
+      <div class="mark" aria-hidden="true">R</div>
+      <span class="eyebrow">Connection interrupted</span>
+      <h1 id="offline-title">You're offline.</h1>
+      <p>Reconnect to the internet to load your courses and sync your progress.</p>
+      <div class="status" role="status"><span aria-hidden="true"></span>Waiting for connection</div>
+      <button id="retry" type="button">Try again</button>
+      <p id="message" aria-live="polite"></p>
+    </main>
+    <script>
+      const message = document.getElementById("message");
+      document.getElementById("retry").addEventListener("click", () => {
+        if (navigator.onLine) {
+          window.location.reload();
+          return;
+        }
+        message.textContent = "Still offline. Rimbly will reconnect when your connection returns.";
+      });
+
+      window.addEventListener("online", () => window.location.reload());
+    </script>
+  </body>
+</html>

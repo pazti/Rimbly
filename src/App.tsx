@@ -136,6 +136,8 @@ type Route =
   | "verify-email"
   | "reset-password"
   | "explore"
+  | "terms"
+  | "privacy"
   | "onboarding"
   | "home"
   | "practice"
@@ -170,6 +172,8 @@ const routes: Route[] = [
   "verify-email",
   "reset-password",
   "explore",
+  "terms",
+  "privacy",
   "onboarding",
   "home",
   "practice",
@@ -271,18 +275,169 @@ const toLocalDateTimeInput = (value: string | null | undefined) => {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 };
 
-const navItems: { route: Route; label: string; icon: string }[] = [
-  { route: "home", label: "Home", icon: "⌂" },
-  { route: "practice", label: "Practice", icon: "▤" },
-  { route: "battle", label: "Battle", icon: "⚔" },
-  { route: "leaderboard", label: "Leaders", icon: "♜" },
-  { route: "profile", label: "Profile", icon: "◉" },
+type IconName =
+  | "home"
+  | "book"
+  | "swords"
+  | "leaderboard"
+  | "user"
+  | "star"
+  | "settings"
+  | "upload"
+  | "bell"
+  | "sparkle"
+  | "flame"
+  | "trending-up"
+  | "heart"
+  | "target"
+  | "moon"
+  | "check"
+  | "bolt"
+  | "diamond"
+  | "arrow-right"
+  | "arrow-left"
+  | "log-out"
+  | "chevron-right"
+  | "chevron-left"
+  | "arrow-down"
+  | "close"
+  | "file";
+
+const iconShapes: Record<IconName, ReactNode> = {
+  home: (
+    <>
+      <path d="m3.5 10 8.5-7 8.5 7" />
+      <path d="M5.5 9v11h13V9M9.5 20v-6h5v6" />
+    </>
+  ),
+  book: (
+    <>
+      <path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5z" />
+      <path d="M5 4.5v17M9 6h7M9 10h7" />
+    </>
+  ),
+  swords: (
+    <>
+      <path d="m5 4 14 14M15.5 4 6 13.5M4 5l1-1 3 3-1 1zM16 16l3 3-1 1-3-3z" />
+      <path d="m4 20 3-3M17 7l3-3" />
+    </>
+  ),
+  leaderboard: (
+    <>
+      <path d="M4 20V11h4v9M10 20V5h4v15M16 20V8h4v12M3 20.5h18" />
+    </>
+  ),
+  user: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M4.5 21a7.5 7.5 0 0 1 15 0" />
+    </>
+  ),
+  star: <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />,
+  settings: (
+    <>
+      <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+      <path d="m19.4 13.5 1.1.9-1.6 2.8-1.4-.5a7.6 7.6 0 0 1-1.7 1l-.2 1.5h-3.2l-.2-1.5a7.6 7.6 0 0 1-1.7-1l-1.4.5-1.6-2.8 1.1-.9a7 7 0 0 1 0-2l-1.1-.9 1.6-2.8 1.4.5a7.6 7.6 0 0 1 1.7-1l.2-1.5h3.2l.2 1.5a7.6 7.6 0 0 1 1.7 1l1.4-.5 1.6 2.8-1.1.9a7 7 0 0 1 0 2Z" />
+    </>
+  ),
+  upload: (
+    <>
+      <path d="M12 16V4m-4 4 4-4 4 4" />
+      <path d="M5 14v5h14v-5" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+      <path d="M10 21h4" />
+    </>
+  ),
+  sparkle: (
+    <>
+      <path d="m12 3 1.6 6.4L20 11l-6.4 1.6L12 19l-1.6-6.4L4 11l6.4-1.6z" />
+      <path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z" />
+    </>
+  ),
+  flame: <path d="M12 22c4.2 0 7-2.8 7-6.7 0-3.2-2-5.6-4.5-8.3.2 2.5-1 3.7-2 4.2C12.2 7.7 10.1 4.9 8.5 3 8.7 7.8 5 10.2 5 15.1 5 19.2 7.8 22 12 22Z" />,
+  "trending-up": (
+    <>
+      <path d="m4 16 6-6 4 4 6-7" />
+      <path d="M14 7h6v6" />
+    </>
+  ),
+  heart: <path d="M20.8 8.8c0 4.2-8.8 10-8.8 10s-8.8-5.8-8.8-10a4.5 4.5 0 0 1 8.8-1.3 4.5 4.5 0 0 1 8.8 1.3Z" />,
+  target: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="4.5" />
+      <circle cx="12" cy="12" r="1" />
+    </>
+  ),
+  moon: <path d="M19.5 15.5A8 8 0 0 1 8.5 4.5 8.5 8.5 0 1 0 19.5 15.5Z" />,
+  check: <path d="m5 12.5 4.5 4.5L19 7" />,
+  bolt: <path d="M13.5 2.5 5 13h6l-.5 8.5L19 11h-6z" />,
+  diamond: <path d="m12 3 9 9-9 9-9-9z" />,
+  "arrow-right": (
+    <>
+      <path d="M4 12h15" />
+      <path d="m13 6 6 6-6 6" />
+    </>
+  ),
+  "arrow-left": (
+    <>
+      <path d="M20 12H5" />
+      <path d="m11 18-6-6 6-6" />
+    </>
+  ),
+  "log-out": (
+    <>
+      <path d="M10 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H10" />
+      <path d="M13 8l4 4-4 4M8 12h9" />
+    </>
+  ),
+  "chevron-right": <path d="m9 5 7 7-7 7" />,
+  "chevron-left": <path d="m15 5-7 7 7 7" />,
+  "arrow-down": (
+    <>
+      <path d="M12 4v15" />
+      <path d="m6 13 6 6 6-6" />
+    </>
+  ),
+  close: (
+    <>
+      <path d="m6 6 12 12M18 6 6 18" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M6 3.5h8l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
+      <path d="M14 3.5V8h4M8 12h8M8 16h8" />
+    </>
+  ),
+};
+
+const navItems: { route: Route; label: string; icon: IconName }[] = [
+  { route: "home", label: "Home", icon: "home" },
+  { route: "practice", label: "Practice", icon: "book" },
+  { route: "battle", label: "Battle", icon: "swords" },
+  { route: "leaderboard", label: "Leaders", icon: "leaderboard" },
+  { route: "profile", label: "Profile", icon: "user" },
 ];
 
-function Icon({ children }: { children: string }) {
+function Icon({ name }: { name: IconName }) {
   return (
     <span className="rimbly-icon" aria-hidden="true">
-      {children}
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        focusable="false"
+      >
+        {iconShapes[name]}
+      </svg>
     </span>
   );
 }
@@ -338,7 +493,7 @@ function Feedback({ error, clear }: { error: string | null; clear: () => void })
     <div className="app-feedback" role="alert">
       <span>{error}</span>
       <button type="button" onClick={clear} aria-label="Dismiss message">
-        ×
+        <Icon name="close" />
       </button>
     </div>
   );
@@ -507,7 +662,8 @@ function QuizPreview({ onCreateAccount }: { onCreateAccount: () => void }) {
           {sampleQuestions.map((sample, index) => (
             <p className="quiz-preview-explanation" key={sample.prompt}>
               <strong>
-                {answers[index] === sample.correctIndex ? "✓" : "Review"} Question {index + 1}:
+                {answers[index] === sample.correctIndex ? <Icon name="check" /> : "Review"} Question{" "}
+                {index + 1}:
               </strong>{" "}
               {sample.explanation}
             </p>
@@ -775,6 +931,11 @@ function AppShell({
   adminAvailable,
   ambassadorAvailable,
   animationsDisabled,
+  userId,
+  billingStatus,
+  billingStatusLoading,
+  isAdmin,
+  canShowReminder,
   onNavigate,
   children,
 }: {
@@ -783,9 +944,55 @@ function AppShell({
   adminAvailable: boolean;
   ambassadorAvailable: boolean;
   animationsDisabled: boolean;
+  userId: string;
+  billingStatus: RimblyBillingStatus | null;
+  billingStatusLoading: boolean;
+  isAdmin: boolean;
+  canShowReminder: boolean;
   onNavigate: (route: Route) => void;
   children: ReactNode;
 }) {
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const main = mainRef.current;
+    if (
+      !main ||
+      animationsDisabled ||
+      !("IntersectionObserver" in window) ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+
+    const elements = Array.from(main.children).filter(
+      (element): element is HTMLElement => element instanceof HTMLElement,
+    );
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -24px 0px" },
+    );
+
+    elements.forEach((element) => {
+      element.classList.add("scroll-reveal");
+      observer.observe(element);
+    });
+
+    return () => {
+      observer.disconnect();
+      elements.forEach((element) => {
+        element.classList.remove("scroll-reveal", "is-visible");
+      });
+    };
+  }, [route, animationsDisabled]);
+
   return (
     <div className={`app-shell ${animationsDisabled ? "motion-disabled" : ""}`}>
       <aside className="desktop-sidebar">
@@ -798,7 +1005,7 @@ function AppShell({
               aria-current={route === item.route ? "page" : undefined}
               onClick={() => onNavigate(item.route)}
             >
-              <Icon>{item.icon}</Icon>
+              <Icon name={item.icon} />
               {item.label}
             </button>
           ))}
@@ -808,7 +1015,7 @@ function AppShell({
               aria-current={route === "ambassador" ? "page" : undefined}
               onClick={() => onNavigate("ambassador")}
             >
-              <Icon>★</Icon>
+              <Icon name="star" />
               Ambassador
             </button>
           )}
@@ -817,21 +1024,21 @@ function AppShell({
               className={route === "admin" ? "active" : ""}
               onClick={() => onNavigate("admin")}
             >
-              <Icon>⚙</Icon>
+              <Icon name="settings" />
               Admin workspace
             </button>
           )}
         </nav>
         <div className="sidebar-bottom">
           <button onClick={() => onNavigate("contribute")}>
-            <Icon>↑</Icon>Contribute
+            <Icon name="upload" />Contribute
           </button>
           <button
             className={route === "settings" ? "active" : ""}
             aria-current={route === "settings" ? "page" : undefined}
             onClick={() => onNavigate("settings")}
           >
-            <Icon>⚙</Icon>Settings
+            <Icon name="settings" />Settings
           </button>
         </div>
       </aside>
@@ -849,7 +1056,7 @@ function AppShell({
                   aria-label="Open admin workspace"
                   aria-current={route === "admin" ? "page" : undefined}
                 >
-                  <Icon>⚙</Icon>
+                  <Icon name="settings" />
                   <span>Admin</span>
                 </button>
               )}
@@ -858,7 +1065,7 @@ function AppShell({
                 onClick={() => onNavigate("notifications")}
                 aria-label="Notifications"
               >
-                <Icon>♧</Icon>
+                <Icon name="bell" />
               </button>
               <button
                 className="icon-btn settings-btn"
@@ -866,17 +1073,31 @@ function AppShell({
                 aria-label="Settings"
                 aria-current={route === "settings" ? "page" : undefined}
               >
-                <Icon>⚙</Icon>
+                <Icon name="settings" />
               </button>
             </div>
           </div>
         </header>
-        <main className="app-main">{children}</main>
+        <main className="app-main" ref={mainRef}>
+          {children}
+        </main>
         <footer className="app-footer" aria-label="Rimbly information and support">
-          <a href="https://rimbly.vercel.app" target="_blank" rel="noreferrer">
+          <a
+            href={routeUrl("terms")}
+            onClick={(event) => {
+              event.preventDefault();
+              onNavigate("terms");
+            }}
+          >
             Terms
           </a>
-          <a href="https://rimbly.vercel.app" target="_blank" rel="noreferrer">
+          <a
+            href={routeUrl("privacy")}
+            onClick={(event) => {
+              event.preventDefault();
+              onNavigate("privacy");
+            }}
+          >
             Privacy
           </a>
           <a href="mailto:paul@rizzbase.tech?subject=Rimbly%20support">Contact</a>
@@ -890,13 +1111,389 @@ function AppShell({
               aria-current={route === item.route ? "page" : undefined}
               onClick={() => onNavigate(item.route)}
             >
-              <Icon>{item.icon}</Icon>
+              <Icon name={item.icon} />
               <span>{item.label}</span>
             </button>
           ))}
         </nav>
       </div>
+      <ProReminder
+        route={route}
+        userId={userId}
+        billingStatus={billingStatus}
+        isPro={Boolean(billingStatus?.is_pro)}
+        billingStatusLoading={billingStatusLoading}
+        isAdmin={isAdmin}
+        canShowReminder={canShowReminder}
+        onNavigate={onNavigate}
+      />
     </div>
+  );
+}
+
+function ProReminder({
+  route,
+  userId,
+  billingStatus,
+  isPro,
+  billingStatusLoading,
+  isAdmin,
+  canShowReminder,
+  onNavigate,
+}: {
+  route: Route;
+  userId: string;
+  billingStatus: RimblyBillingStatus | null;
+  isPro: boolean;
+  billingStatusLoading: boolean;
+  isAdmin: boolean;
+  canShowReminder: boolean;
+  onNavigate: (route: Route) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const reminderKey = `rimbly-pro-reminder:${userId}`;
+  const eligible =
+    route === "home" &&
+    !isPro &&
+    !isAdmin &&
+    canShowReminder &&
+    !billingStatusLoading &&
+    billingStatus !== null;
+
+  useEffect(() => {
+    if (!eligible) setOpen(false);
+  }, [eligible]);
+
+  useEffect(() => {
+    if (!eligible || open) return;
+
+    try {
+      const lastShown = Number(window.localStorage.getItem(reminderKey));
+      if (Number.isFinite(lastShown) && Date.now() - lastShown < 7 * 24 * 60 * 60 * 1000) {
+        return;
+      }
+    } catch (error) {
+      console.error("Could not check the Rimbly Pro reminder preference:", error);
+    }
+
+    const timer = window.setTimeout(() => {
+      setOpen(true);
+      try {
+        window.localStorage.setItem(reminderKey, String(Date.now()));
+      } catch (error) {
+        console.error("Could not save the Rimbly Pro reminder preference:", error);
+      }
+    }, 45_000);
+
+    return () => window.clearTimeout(timer);
+  }, [eligible, open, reminderKey]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!dialogRef.current?.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="pro-reminder-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) setOpen(false);
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="pro-reminder-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pro-reminder-title"
+        aria-describedby="pro-reminder-description"
+      >
+        <button
+          ref={closeButtonRef}
+          className="pro-reminder-close"
+          type="button"
+          aria-label="Close Pro reminder"
+          onClick={() => setOpen(false)}
+        >
+          <Icon name="close" />
+        </button>
+        <div className="pro-reminder-art" aria-hidden="true">
+          <span className="pro-reminder-orbit pro-reminder-orbit-one" />
+          <span className="pro-reminder-orbit pro-reminder-orbit-two" />
+          <span className="pro-reminder-art-mark">
+            <Icon name="sparkle" />
+          </span>
+          <span className="pro-reminder-art-pro">PRO</span>
+        </div>
+        <div className="pro-reminder-copy">
+          <span className="eyebrow">A little more room to grow</span>
+          <h2 id="pro-reminder-title">Make your study time go further.</h2>
+          <p id="pro-reminder-description">
+            Unlock the full past-paper library, unlimited daily practice, and 30-day progress
+            insights with Rimbly Pro.
+          </p>
+          <ul className="pro-reminder-benefits">
+            <li>
+              <Icon name="check" /> Full past-paper access
+            </li>
+            <li>
+              <Icon name="check" /> Unlimited quiz practice
+            </li>
+            <li>
+              <Icon name="check" /> From ₦500 for 7 days
+            </li>
+          </ul>
+          <div className="pro-reminder-actions">
+            <Button
+              onClick={() => {
+                setOpen(false);
+                onNavigate("subscription");
+              }}
+            >
+              Explore Pro plans <Icon name="arrow-right" />
+            </Button>
+            <button className="pro-reminder-later" type="button" onClick={() => setOpen(false)}>
+              Maybe later
+            </button>
+          </div>
+          <small className="pro-reminder-note">One-time plans · No automatic renewals</small>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LegalPage({
+  page,
+  onNavigate,
+}: {
+  page: "terms" | "privacy";
+  onNavigate: (route: Route) => void;
+}) {
+  const isPrivacy = page === "privacy";
+  const title = isPrivacy ? "Privacy Policy" : "Terms of Service";
+  const sections = isPrivacy
+    ? [
+        {
+          heading: "Information we collect",
+          text: "Depending on how you use Rimbly, we may collect your account details (such as your email address), profile information you provide (such as your name, university, department, and study level), and activity needed to provide the service (such as quiz answers, results, progress, saved courses, and battles). If you submit study materials, we process the files and details you provide. Technical and diagnostic information may also be collected to operate and improve the service.",
+        },
+        {
+          heading: "How we use information",
+          text: "We use information to create and secure accounts, provide learning features, save progress, operate leaderboards and battles, review submitted materials, respond to support requests, process subscriptions, prevent abuse, and maintain and improve Rimbly. We use only what is reasonably needed for these purposes.",
+        },
+        {
+          heading: "Analytics and browser storage",
+          text: "Rimbly uses Vercel Analytics to understand how the service is used and improve it. The app also stores some preferences and temporary sign-in flow details in your browser's local or session storage. You can clear browser storage in your browser settings; doing so may reset saved preferences or interrupt an in-progress sign-in.",
+        },
+        {
+          heading: "What other people can see",
+          text: "Some features are social. Information you choose to display in a profile, leaderboard, or battle may be visible to other users. Materials you submit may be reviewed by our team and, if accepted for the learning library, made available to other users. Do not include personal or confidential information in a submission.",
+        },
+        {
+          heading: "Service providers and sharing",
+          text: "We use service providers to support hosting, authentication, database and file storage, analytics, and payments. They may process information on our behalf to provide those services. We do not sell your personal information. We may also disclose information when required by law, to protect users and the service, or as part of a business transfer. We do not share account information with other users except as described above or as you choose.",
+        },
+        {
+          heading: "Storage, security, and retention",
+          text: "We use reasonable safeguards designed to protect information, but no online service can guarantee absolute security. We keep information for as long as needed to provide Rimbly, meet legal obligations, resolve disputes, and enforce our agreements. Retention periods may differ for account records, submitted materials, and backups.",
+        },
+        {
+          heading: "Your choices",
+          text: "You can update profile details in your account settings and may request account deletion through the service or by contacting us. Some records may need to be retained where the law requires it or for legitimate operational purposes. You can also contact us with questions or requests about your information.",
+        },
+        {
+          heading: "Children and location",
+          text: "Rimbly is intended for students and is not designed for children who are below the minimum age at which they may consent to online services in their location. If you believe a child has provided personal information without appropriate consent, contact us. Depending on where you live, you may have additional privacy rights under local law.",
+        },
+        {
+          heading: "Changes and contact",
+          text: "We may update this policy as Rimbly changes. We will post the current version on this page and update the date above. For privacy questions or requests, email paul@rizzbase.tech.",
+        },
+      ]
+    : [
+        {
+          heading: "Using Rimbly",
+          text: "Rimbly provides study tools, practice quizzes, learning progress, leaderboards, battles, and a library of academic materials. You may use the service only in compliance with these terms and applicable laws. You must provide accurate account information, keep your sign-in credentials secure, and be responsible for activity under your account.",
+        },
+        {
+          heading: "Study materials and contributions",
+          text: "You must have the right to submit any file or information you provide. By submitting materials, you give Rimbly a non-exclusive, worldwide, royalty-free license to host, review, reproduce, and make those materials available through the service for its educational purposes. You retain ownership of your content. Do not submit confidential information, personal data about others, or material that infringes someone else's rights. We may decline or remove submissions.",
+        },
+        {
+          heading: "Acceptable use",
+          text: "Do not misuse, disrupt, or attempt to gain unauthorized access to Rimbly; upload malicious code; interfere with other users; or use the service to violate the rights of others or applicable law. Do not misrepresent quiz results, manipulate leaderboards, or use the service to facilitate academic misconduct.",
+        },
+        {
+          heading: "Learning content",
+          text: "Rimbly's quizzes and study materials are for learning and practice. They may be incomplete, user-submitted, or differ from current course requirements. They are not official advice or a guarantee of academic results. Check important information against materials provided by your institution.",
+        },
+        {
+          heading: "Accounts and availability",
+          text: "You may stop using Rimbly at any time. We may suspend or end access if needed to protect users or the service, address a violation of these terms, or comply with law. We may change or discontinue features, and we do not promise uninterrupted or error-free availability.",
+        },
+        {
+          heading: "Subscriptions and payments",
+          text: "Some features may require payment. Prices, billing intervals, and applicable terms will be shown before purchase. Payments may be handled by a third-party provider and are subject to that provider's terms. Cancellation, renewal, and refund details are presented at purchase or in your subscription settings and may depend on the payment provider and applicable law.",
+        },
+        {
+          heading: "Ownership and third-party services",
+          text: "Rimbly and its original software, branding, and content are protected by applicable intellectual-property laws. These terms do not transfer ownership to you. The service may link to or rely on third-party services; their own terms and privacy policies apply to your use of them.",
+        },
+        {
+          heading: "Disclaimers and liability",
+          text: "To the extent permitted by law, Rimbly is provided as available without warranties beyond those that cannot legally be excluded. To the extent permitted by law, Rimbly is not liable for indirect or consequential loss arising from your use of the service. Nothing in these terms limits rights or liability that cannot be limited under applicable law.",
+        },
+        {
+          heading: "Changes and contact",
+          text: "We may update these terms as the service changes. Continued use after updated terms are posted means you accept them to the extent allowed by law. For questions, email paul@rizzbase.tech.",
+        },
+      ];
+
+  return (
+    <div className="legal-page">
+      <header className="legal-header">
+        <Logo onClick={() => onNavigate("welcome")} />
+        <nav aria-label="Account navigation">
+          <button type="button" className="legal-nav-link" onClick={() => onNavigate("login")}>
+            Sign in
+          </button>
+          <Button onClick={() => onNavigate("signup")}>Create account</Button>
+        </nav>
+      </header>
+      <main className="legal-content">
+        <button className="legal-back-link" type="button" onClick={() => onNavigate("welcome")}>
+          <Icon name="arrow-left" /> Back to Rimbly
+        </button>
+        <div className="legal-intro">
+          <span className="eyebrow">Rimbly · Legal</span>
+          <h1>{title}</h1>
+          <p>Last updated November 25, 2026</p>
+        </div>
+        {isPrivacy && (
+          <p className="legal-summary">
+            This policy explains what information we handle when you use Rimbly, why we use it, and
+            the choices available to you.
+          </p>
+        )}
+        <div className="legal-sections">
+          {sections.map((section, index) => (
+            <section key={section.heading}>
+              <span className="legal-section-number">{String(index + 1).padStart(2, "0")}</span>
+              <div>
+                <h2>{section.heading}</h2>
+                <p>{section.text}</p>
+              </div>
+            </section>
+          ))}
+        </div>
+        <div className="legal-switcher">
+          <span>Also read</span>
+          <button
+            type="button"
+            className={isPrivacy ? "" : "active"}
+            onClick={() => onNavigate("terms")}
+          >
+            Terms of Service
+          </button>
+          <button
+            type="button"
+            className={isPrivacy ? "active" : ""}
+            onClick={() => onNavigate("privacy")}
+          >
+            Privacy Policy
+          </button>
+        </div>
+        <footer className="legal-footer">
+          <span>© {new Date().getFullYear()} Rimbly</span>
+          <a href="mailto:paul@rizzbase.tech?subject=Rimbly%20legal%20question">
+            Contact us
+          </a>
+        </footer>
+      </main>
+    </div>
+  );
+}
+
+function OfflinePage() {
+  const [message, setMessage] = useState("");
+
+  return (
+    <main className="offline-page">
+      <section className="offline-card" aria-labelledby="offline-title">
+        <div className="offline-mark" aria-hidden="true">
+          R
+        </div>
+        <span className="eyebrow">Connection interrupted</span>
+        <h1 id="offline-title">You’re offline.</h1>
+        <p>Reconnect to the internet to load your courses and sync your progress.</p>
+        <div className="offline-status">
+          <span aria-hidden="true" />
+          Waiting for connection
+        </div>
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={() => {
+            if (window.navigator.onLine) {
+              window.location.reload();
+            } else {
+              setMessage("Still offline. Rimbly will reconnect when your connection returns.");
+            }
+          }}
+        >
+          Try again
+        </button>
+        <p className="offline-message" role="status">
+          {message}
+        </p>
+      </section>
+    </main>
   );
 }
 
@@ -929,7 +1526,7 @@ function AuthPage({
         <div className="auth-form-head">
           <Logo onClick={() => onNavigate("welcome")} />
           <button type="button" onClick={() => onNavigate("welcome")} aria-label="Close">
-            ×
+            <Icon name="close" />
           </button>
         </div>
         <div className="auth-copy">
@@ -1226,9 +1823,15 @@ function MaintenancePage({
           <div className="maintenance-sun" />
           <div className="maintenance-hill maintenance-hill-back" />
           <div className="maintenance-hill maintenance-hill-front" />
-          <div className="maintenance-tool">✦</div>
-          <div className="maintenance-star maintenance-star-one">✦</div>
-          <div className="maintenance-star maintenance-star-two">✧</div>
+          <div className="maintenance-tool">
+            <Icon name="sparkle" />
+          </div>
+          <div className="maintenance-star maintenance-star-one">
+            <Icon name="sparkle" />
+          </div>
+          <div className="maintenance-star maintenance-star-two">
+            <Icon name="sparkle" />
+          </div>
         </div>
         <span className="maintenance-label">
           <span className="maintenance-live-dot" />
@@ -1274,7 +1877,7 @@ function MaintenancePage({
           <span>Your account and saved progress are safe.</span>
           <button type="button" className="maintenance-admin-link" onClick={onAdminSignIn}>
             {signedIn ? "Switch to Super Admin" : "Super Admin sign in"}{" "}
-            <span aria-hidden="true">→</span>
+            <Icon name="arrow-right" />
           </button>
         </div>
       </section>
@@ -1296,7 +1899,7 @@ function CourseCard({
   return (
     <button className="course-card" onClick={onClick}>
       <span className="course-icon tone-purple">
-        <Icon>▤</Icon>
+        <Icon name="book" />
       </span>
       <span className="course-copy">
         <span className="course-tags">
@@ -1319,7 +1922,7 @@ function CourseCard({
           </em>
         </span>
       </span>
-      <span aria-hidden="true">›</span>
+      <Icon name="chevron-right" />
     </button>
   );
 }
@@ -1419,7 +2022,7 @@ function QuizCatalogCard({
   return (
     <article className="quiz-catalog-card">
       <span className="quiz-card-mark" aria-hidden="true">
-        ✦
+        <Icon name="book" />
       </span>
       <div className="quiz-card-copy">
         {courseLabel && <span className="quiz-card-course">{courseLabel}</span>}
@@ -1447,7 +2050,7 @@ function QuizCatalogCard({
         <span className="quiz-card-question-count">{quiz.question_count} questions</span>
         <Button disabled={busy} onClick={onTake} ariaLabel={`Start quiz: ${quiz.title}`}>
           {busy ? "Loading…" : "Start quiz"}
-          <span aria-hidden="true">→</span>
+          <Icon name="arrow-right" />
         </Button>
       </div>
     </article>
@@ -1593,22 +2196,22 @@ function QuizSetupPage({
           <div className="practice-filter-chips" aria-label="Active quiz filters">
             {search.trim() && (
               <button type="button" onClick={() => setSearch("")}>
-                Search: {search.trim()} <span aria-hidden="true">×</span>
+                Search: {search.trim()} <Icon name="close" />
               </button>
             )}
             {level && (
               <button type="button" onClick={() => setLevel("")}>
-                {level} <span aria-hidden="true">×</span>
+                {level} <Icon name="close" />
               </button>
             )}
             {faculty && (
               <button type="button" onClick={() => setFaculty("")}>
-                {faculty} <span aria-hidden="true">×</span>
+                {faculty} <Icon name="close" />
               </button>
             )}
             {department && (
               <button type="button" onClick={() => setDepartment("")}>
-                {department} <span aria-hidden="true">×</span>
+                {department} <Icon name="close" />
               </button>
             )}
           </div>
@@ -1736,7 +2339,13 @@ function DailyGoalCard({
     >
       <div className="daily-goal-main">
         <span className="daily-goal-icon" aria-hidden="true">
-          {didPractice ? "✓" : progress?.current_daily_streak ? "🔥" : "✦"}
+          {didPractice ? (
+            <Icon name="check" />
+          ) : progress?.current_daily_streak ? (
+            <Icon name="flame" />
+          ) : (
+            <Icon name="sparkle" />
+          )}
           {progress?.current_daily_streak ? (
             <strong>{progress.current_daily_streak}</strong>
           ) : !didPractice && progress ? (
@@ -1801,7 +2410,7 @@ function DailyGoalCard({
           <div className="daily-streak-badges" aria-label="Daily streak rewards">
             {[3, 7, 14, 30].map((days) => (
               <span className={progress.best_daily_streak >= days ? "earned" : ""} key={days}>
-                {days} days{progress.best_daily_streak >= days ? " ✓" : ""}
+                {days} days {progress.best_daily_streak >= days && <Icon name="check" />}
               </span>
             ))}
           </div>
@@ -2008,17 +2617,17 @@ function LearningProgressCard({
       isToday: day.toDateString() === todayKey,
     };
   });
-  const badges = [
+  const badges: { name: string; icon: IconName; earned: boolean; detail: string }[] = [
     {
       name: "First Steps",
-      icon: "✦",
+      icon: "sparkle",
       earned:
         progress?.badges.some((badge) => badge.badge_id === "first_steps") ?? attempts.length > 0,
       detail: "Complete your first quiz",
     },
     {
       name: "Consistent Scholar",
-      icon: "🔥",
+      icon: "flame",
       earned:
         (progress?.badges.some((badge) => badge.badge_id === "daily_7") ?? false) ||
         bestStreak >= 7,
@@ -2026,7 +2635,7 @@ function LearningProgressCard({
     },
     {
       name: "Comeback",
-      icon: "↗",
+      icon: "trending-up",
       earned:
         (progress?.badges.some((badge) => badge.badge_id === "comeback") ?? false) ||
         improvements > 0,
@@ -2034,7 +2643,7 @@ function LearningProgressCard({
     },
     {
       name: "Perfect Run",
-      icon: "★",
+      icon: "star",
       earned:
         (progress?.badges.some((badge) => badge.badge_id === "perfect_score") ?? false) ||
         attempts.some((attempt) => attempt.score_percent === 100),
@@ -2042,19 +2651,19 @@ function LearningProgressCard({
     },
     {
       name: "Helpful Contributor",
-      icon: "♡",
+      icon: "heart",
       earned: progress?.badges.some((badge) => badge.badge_id === "helpful_contributor") ?? false,
       detail: "Share a resource that helps classmates",
     },
     {
       name: "Campus Connector",
-      icon: "◎",
+      icon: "target",
       earned: progress?.badges.some((badge) => badge.badge_id === "campus_connector") ?? false,
       detail: "Help a classmate get started on Rimbly",
     },
     {
       name: "Night Owl",
-      icon: "☾",
+      icon: "moon",
       earned: attempts.some((attempt) => {
         const hour = new Date(attempt.created_at).getHours();
         return hour >= 21 || hour < 5;
@@ -2222,7 +2831,7 @@ function LearningProgressCard({
         </div>
         <div className="learning-mission-list">
           <article>
-            <span aria-hidden="true">◎</span>
+            <Icon name="target" />
             <div>
               <strong>Complete today’s study goal</strong>
               <small>
@@ -2231,10 +2840,10 @@ function LearningProgressCard({
                   : `Finish one quiz · +${dailyMission?.xp_reward ?? 20} XP`}
               </small>
             </div>
-            <b>{dailyGoalComplete ? "✓" : "Start"}</b>
+            <b>{dailyGoalComplete ? <Icon name="check" /> : "Start"}</b>
           </article>
           <article>
-            <span aria-hidden="true">✦</span>
+            <Icon name="sparkle" />
             <div>
               <strong>Study on three days</strong>
               <small>
@@ -2247,12 +2856,12 @@ function LearningProgressCard({
             </div>
             <b>
               {weeklyStudyMission?.completed
-                ? "✓"
+                ? <Icon name="check" />
                 : `${Math.max(0, (weeklyStudyMission?.target ?? weeklyTarget) - weeklyStudyDays)} left`}
             </b>
           </article>
           <article>
-            <span aria-hidden="true">↗</span>
+            <Icon name="trending-up" />
             <div>
               <strong>
                 {weakestCourse ? `Revisit ${weakestCourse.course.code}` : "Explore a new course"}
@@ -2270,13 +2879,13 @@ function LearningProgressCard({
                       attempt.paper_id &&
                       paperCourseById.get(attempt.paper_id) === weakestCourse.course.id,
                   )
-                  ? "✓"
+                  ? <Icon name="check" />
                   : "Try it"
                 : "Browse"}
             </b>
           </article>
           <article>
-            <span aria-hidden="true">⚔</span>
+            <Icon name="swords" />
             <div>
               <strong>Win a study battle</strong>
               <small>
@@ -2308,7 +2917,7 @@ function LearningProgressCard({
         <div className="learning-badges">
           {badges.map((badge) => (
             <article className={badge.earned ? "earned" : ""} key={badge.name} title={badge.detail}>
-              <span aria-hidden="true">{badge.icon}</span>
+              <Icon name={badge.icon} />
               <strong>{badge.name}</strong>
             </article>
           ))}
@@ -2343,7 +2952,7 @@ function DailyChallengeCard({
           <h2>Daily challenge</h2>
         </div>
         <span className="daily-challenge-mark" aria-hidden="true">
-          ✦
+          <Icon name="sparkle" />
         </span>
       </div>
       {quiz ? (
@@ -2594,7 +3203,9 @@ function SubscriptionPage({
     <>
       <section className="billing-pro-hero" aria-labelledby="billing-pro-title">
         <div className="billing-pro-hero-copy">
-          <span className="billing-pro-kicker">✦ RIMBLY PRO</span>
+          <span className="billing-pro-kicker">
+            <Icon name="sparkle" /> RIMBLY PRO
+          </span>
           <h1 id="billing-pro-title">
             {status?.is_pro ? "Keep your study momentum." : "Make more room to improve."}
           </h1>
@@ -2611,14 +3222,16 @@ function SubscriptionPage({
           </div>
           <a className="billing-pro-cta" href="#rimbly-pro-plans">
             {status?.is_pro ? "View plan options" : "Explore Pro plans"}{" "}
-            <span aria-hidden="true">→</span>
+            <Icon name="arrow-right" />
           </a>
           <small>Past-question practice stays free · Pro unlocks the full library</small>
         </div>
         <div className="billing-pro-hero-mark" aria-hidden="true">
           <span>STUDY WITH</span>
           <strong>PRO</strong>
-          <i>✦</i>
+          <i>
+            <Icon name="sparkle" />
+          </i>
           <small>Make every session count</small>
         </div>
       </section>
@@ -2673,8 +3286,8 @@ function SubscriptionPage({
       <section className="billing-usage">
         <div className="section-title">
           <div>
-            <span>Today · UTC</span>
-            <h2>Your free-plan usage</h2>
+            <span>UTC usage</span>
+            <h2>Your plan usage</h2>
           </div>
           {status && <button onClick={onRefresh}>Refresh</button>}
         </div>
@@ -2686,7 +3299,7 @@ function SubscriptionPage({
             unlimited={Boolean(status?.is_pro)}
           />
           <UsageMeter
-            label="Battle invites sent"
+            label="Battle invites sent today"
             used={status?.battle_invites_used_today ?? 0}
             limit={status?.free_battle_limit ?? 3}
             unlimited={Boolean(status?.is_pro)}
@@ -2732,7 +3345,7 @@ function SubscriptionPage({
           <h2>Strong basics, always free</h2>
           <ul>
             <li>Past questions · 3 free paper unlocks</li>
-            <li>5 quiz submissions per day</li>
+            <li>3 quiz submissions per UTC week (resets Monday)</li>
             <li>3 one-on-one battle invites per day</li>
             <li>University leaderboard and standard titles</li>
             <li>Basic practice stats</li>
@@ -2873,7 +3486,7 @@ function LibraryPlanAccess() {
             </div>
             {!hasFullAccess && (
               <a className="billing-pro-cta" href="#rimbly-pro-plans">
-                Unlock with Pro <span aria-hidden="true">→</span>
+                Unlock with Pro <Icon name="arrow-right" />
               </a>
             )}
           </div>
@@ -2956,6 +3569,17 @@ function readCachedMaintenanceStatus(): MaintenanceStatus | null {
 
 function App() {
   const [route, setRoute] = useState<Route>(routeFromLocation);
+  const [isOffline, setIsOffline] = useState(() => !window.navigator.onLine);
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
   const [animationsDisabled, setAnimationsDisabled] = useState(
     () => window.localStorage.getItem("rimbly-disable-celebrations") === "true",
   );
@@ -4420,6 +5044,10 @@ function App() {
   const pageError = error;
   const configurationBanner = supabaseConfigurationError;
 
+  if (isOffline) {
+    return <OfflinePage />;
+  }
+
   if (!authReady || (route !== "login" && !maintenanceStatusLoaded)) {
     return (
       <div className="loading-screen" role="status">
@@ -4554,6 +5182,10 @@ function App() {
     return <GuestExplorePage configured={Boolean(supabase)} onNavigate={navigate} />;
   }
 
+  if (route === "terms" || route === "privacy") {
+    return <LegalPage page={route} onNavigate={navigate} />;
+  }
+
   if (route === "ambassador" && !user) {
     return (
       <AmbassadorPage
@@ -4641,23 +5273,31 @@ function App() {
               disabled={!supabase}
               onClick={() => navigate("signup")}
             >
-              Create a free account →
+              Create a free account <Icon name="arrow-right" />
             </button>
             <button
               className="guest-explore-link"
               type="button"
               onClick={() => navigate("explore")}
             >
-              Explore courses without an account →
+              Explore courses without an account <Icon name="arrow-right" />
             </button>
             <button
               className="guest-explore-link"
               type="button"
               onClick={() => navigate("ambassador")}
             >
-              Ambassador program →
+              Ambassador program <Icon name="arrow-right" />
             </button>
             <small>Reviewed quizzes · University-focused courses · Score and answer review</small>
+            <div className="welcome-legal-links">
+              <button type="button" onClick={() => navigate("terms")}>
+                Terms
+              </button>
+              <button type="button" onClick={() => navigate("privacy")}>
+                Privacy
+              </button>
+            </div>
           </section>
         </div>
       );
@@ -4846,7 +5486,7 @@ function App() {
               onClick={() => navigate("notifications")}
               aria-label="Notifications"
             >
-              ♧
+              <Icon name="bell" />
             </button>
           </div>
           {showHomeGuide && (
@@ -4942,7 +5582,9 @@ function App() {
                 <span>From the study library</span>
                 <h2>Courses for you</h2>
               </div>
-              <button onClick={() => navigate("practice")}>Browse all ›</button>
+              <button onClick={() => navigate("practice")}>
+                Browse all <Icon name="chevron-right" />
+              </button>
             </div>
             {prioritizedCourses.length ? (
               <div className="course-list">
@@ -4988,15 +5630,17 @@ function App() {
                   <span>Your account</span>
                   <h2>Practice activity</h2>
                 </div>
-                <button onClick={() => navigate("quiz-history")}>Quiz history ›</button>
+                <button onClick={() => navigate("quiz-history")}>
+                  Quiz history <Icon name="chevron-right" />
+                </button>
               </div>
               {attempts.length || gameProgress?.battle_wins ? (
                 <div className="stats-grid">
                   {attempts.length > 0 && (
                     <>
-                      <Stat icon="✓" value={String(attempts.length)} label="Saved quizzes" />
+                      <Stat icon="check" value={String(attempts.length)} label="Saved quizzes" />
                       <Stat
-                        icon="◎"
+                        icon="target"
                         value={`${Math.round(attempts.reduce((sum, item) => sum + item.score_percent, 0) / attempts.length)}%`}
                         label="Average score"
                       />
@@ -5005,13 +5649,13 @@ function App() {
                   {gameProgress?.battle_wins ? (
                     <>
                       <Stat
-                        icon="⚔"
+                        icon="swords"
                         value={`${gameProgress.current_win_streak} · best ${gameProgress.best_win_streak}`}
                         label="Battle win streak"
                         tone="hot"
                       />
                       <Stat
-                        icon="🔥"
+                        icon="flame"
                         value={`${gameProgress.current_daily_streak} days`}
                         label="Daily streak"
                         tone="hot"
@@ -5378,27 +6022,27 @@ function App() {
             </div>
             <div className="title-preview-grid">
               <article>
-                <span aria-hidden="true">✦</span>
+                <Icon name="sparkle" />
                 <strong>Rookie</strong>
                 <small>Your starting title</small>
               </article>
               <article>
-                <span aria-hidden="true">⚔</span>
+                <Icon name="swords" />
                 <strong>Contender</strong>
                 <small>Win your first battle</small>
               </article>
               <article>
-                <span aria-hidden="true">✧</span>
+                <Icon name="sparkle" />
                 <strong>Elite</strong>
                 <small>Reach a 3-win streak</small>
               </article>
               <article>
-                <span aria-hidden="true">◆</span>
+                <Icon name="diamond" />
                 <strong>Grandmaster</strong>
                 <small>Reach a 5-win streak</small>
               </article>
               <article>
-                <span aria-hidden="true">★</span>
+                <Icon name="star" />
                 <strong>Campus Legend</strong>
                 <small>Reach a 10-win streak</small>
               </article>
@@ -5572,7 +6216,7 @@ function App() {
                     : "Earn ₦250 for every new student who completes their first quiz"}
                 </small>
               </span>
-              <span aria-hidden="true">→</span>
+              <Icon name="arrow-right" />
             </button>
           )}
           <form
@@ -5670,7 +6314,9 @@ function App() {
                 <span>Available across departments and universities</span>
                 <h2>Published quizzes</h2>
               </div>
-              <button onClick={() => navigate("quiz-setup")}>Browse all ›</button>
+              <button onClick={() => navigate("quiz-setup")}>
+                Browse all <Icon name="chevron-right" />
+              </button>
             </div>
             {publishedQuizSetsLoading ? (
               <LoadingCards label="Loading published quizzes" />
@@ -5719,7 +6365,7 @@ function App() {
             <div className="profile-menu">
               <button onClick={() => navigate("subscription")}>
                 <span className="profile-menu-icon" aria-hidden="true">
-                  ✦
+                  <Icon name="sparkle" />
                 </span>
                 <span className="profile-menu-copy">
                   <strong>Rimbly Pro</strong>
@@ -5730,24 +6376,24 @@ function App() {
                   </small>
                 </span>
                 <span className="profile-menu-arrow" aria-hidden="true">
-                  ›
+                  <Icon name="chevron-right" />
                 </span>
               </button>
               <button onClick={() => navigate("settings")}>
                 <span className="profile-menu-icon" aria-hidden="true">
-                  ⚙
+                  <Icon name="settings" />
                 </span>
                 <span className="profile-menu-copy">
                   <strong>Settings</strong>
                   <small>Update your password, notification preference, or account</small>
                 </span>
                 <span className="profile-menu-arrow" aria-hidden="true">
-                  ›
+                  <Icon name="chevron-right" />
                 </span>
               </button>
               <button onClick={() => navigate("contribute")}>
                 <span className="profile-menu-icon" aria-hidden="true">
-                  ↑
+                  <Icon name="upload" />
                 </span>
                 <span className="profile-menu-copy">
                   <strong>My contributions</strong>
@@ -5758,45 +6404,45 @@ function App() {
                   </small>
                 </span>
                 <span className="profile-menu-arrow" aria-hidden="true">
-                  ›
+                  <Icon name="chevron-right" />
                 </span>
               </button>
               {adminAccess?.permissions.includes("dashboard.access") && (
                 <button className="profile-menu-admin" onClick={() => navigate("admin")}>
                   <span className="profile-menu-icon" aria-hidden="true">
-                    ⚙
+                    <Icon name="settings" />
                   </span>
                   <span className="profile-menu-copy">
                     <strong>Admin workspace</strong>
                     <small>Manage content, accounts, and your team</small>
                   </span>
                   <span className="profile-menu-arrow" aria-hidden="true">
-                    ›
+                    <Icon name="chevron-right" />
                   </span>
                 </button>
               )}
               <button onClick={() => navigate("suggest")}>
                 <span className="profile-menu-icon" aria-hidden="true">
-                  ✦
+                  <Icon name="sparkle" />
                 </span>
                 <span className="profile-menu-copy">
                   <strong>Send feedback</strong>
                   <small>Share an idea or report an issue</small>
                 </span>
                 <span className="profile-menu-arrow" aria-hidden="true">
-                  ›
+                  <Icon name="chevron-right" />
                 </span>
               </button>
               <button className="logout" disabled={busy} onClick={() => void handleSignOut()}>
                 <span className="profile-menu-icon" aria-hidden="true">
-                  ↗
+                  <Icon name="log-out" />
                 </span>
                 <span className="profile-menu-copy">
                   <strong>Sign out</strong>
                   <small>End your current session</small>
                 </span>
                 <span className="profile-menu-arrow" aria-hidden="true">
-                  ›
+                  <Icon name="chevron-right" />
                 </span>
               </button>
             </div>
@@ -5951,7 +6597,7 @@ function App() {
         <div className="app-notice" role="status">
           <span>{notice}</span>
           <button onClick={() => setNotice(null)} aria-label="Dismiss">
-            ×
+            <Icon name="close" />
           </button>
         </div>
       )}
@@ -5963,6 +6609,13 @@ function App() {
           ambassadorDashboard !== null && ambassadorDashboard.status !== "removed"
         }
         animationsDisabled={animationsDisabled}
+        userId={user.id}
+        billingStatus={billingStatus}
+        billingStatusLoading={billingStatusLoading}
+        isAdmin={Boolean(
+          libraryAccessStatus?.is_admin || adminAccess?.permissions.includes("dashboard.access"),
+        )}
+        canShowReminder={!sourceToRead && !showHomeGuide}
         onNavigate={navigate}
       >
         {content}
@@ -6115,7 +6768,7 @@ function AmbassadorPage({
             </p>
           ) : dashboard?.status === "active" ? (
             <a className="btn btn-primary ambassador-dashboard-jump" href="#ambassador-dashboard">
-              Open your invite dashboard ↓
+              Open your invite dashboard <Icon name="arrow-down" />
             </a>
           ) : signedIn && dashboard?.status === "paused" ? (
             <p className="ambassador-status-message" role="status">
@@ -6184,13 +6837,25 @@ function AmbassadorPage({
               </label>
               <div className="ambassador-share-actions">
                 <Button variant="secondary" onClick={() => void copyText(inviteUrl, "link")}>
-                  {copied === "link" ? "Link copied ✓" : "Copy invite link"}
+                  {copied === "link" ? (
+                    <>
+                      Link copied <Icon name="check" />
+                    </>
+                  ) : (
+                    "Copy invite link"
+                  )}
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={() => void copyText(dashboard.invite_code, "code")}
                 >
-                  {copied === "code" ? "Code copied ✓" : "Copy code"}
+                  {copied === "code" ? (
+                    <>
+                      Code copied <Icon name="check" />
+                    </>
+                  ) : (
+                    "Copy code"
+                  )}
                 </Button>
                 <a
                   className="btn btn-secondary"
@@ -6408,7 +7073,9 @@ function AmbassadorPage({
         </section>
       </main>
       <footer className="ambassador-footer">
-        <button onClick={() => onNavigate(signedIn ? "home" : "welcome")}>← Back to Rimbly</button>
+        <button onClick={() => onNavigate(signedIn ? "home" : "welcome")}>
+          <Icon name="arrow-left" /> Back to Rimbly
+        </button>
         {!signedIn && <button onClick={onSignIn}>Sign in to your account</button>}
       </footer>
     </div>
@@ -7397,7 +8064,7 @@ function AdminWorkspace({
             ))}
         </nav>
         <button type="button" className="admin-back-link" onClick={() => onNavigate("home")}>
-          <span aria-hidden="true">←</span>
+          <Icon name="arrow-left" />
           Student app
         </button>
       </aside>
@@ -8164,7 +8831,7 @@ function AdminWorkspace({
                   </span>
                 </div>
                 <div className="maintenance-admin-callout">
-                  <span aria-hidden="true">✦</span>
+                  <Icon name="sparkle" />
                   <p>
                     Turning this on shows students a polished maintenance page with a live
                     countdown. <strong>Your Super Admin account keeps full access</strong> to the
@@ -8305,7 +8972,7 @@ function AdminWorkspace({
                     Open in new tab
                   </a>
                   <button onClick={() => setPreviewUrl(null)} aria-label="Close preview">
-                    ×
+                    <Icon name="close" />
                   </button>
                 </div>
               </header>
@@ -8324,14 +8991,14 @@ function Stat({
   label,
   tone,
 }: {
-  icon: string;
+  icon: IconName;
   value: string;
   label: string;
   tone?: "hot";
 }) {
   return (
     <div className={`stat-card ${tone ?? ""}`}>
-      <span>{icon}</span>
+      <Icon name={icon} />
       <b>{value}</b>
       <small>{label}</small>
     </div>
@@ -9137,7 +9804,7 @@ function AdminQuizWorkspace({
                               })
                             }
                           >
-                            ×
+                            <Icon name="close" />
                           </button>
                         )}
                       </span>
@@ -9546,22 +10213,22 @@ function PracticePage({
           <div className="practice-filter-chips" aria-label="Active course filters">
             {search.trim() && (
               <button type="button" onClick={() => setSearch("")}>
-                Search: {search.trim()} <span aria-hidden="true">×</span>
+                Search: {search.trim()} <Icon name="close" />
               </button>
             )}
             {level && (
               <button type="button" onClick={() => setLevel("")}>
-                {level} <span aria-hidden="true">×</span>
+                {level} <Icon name="close" />
               </button>
             )}
             {faculty && (
               <button type="button" onClick={() => setFaculty("")}>
-                {faculty} <span aria-hidden="true">×</span>
+                {faculty} <Icon name="close" />
               </button>
             )}
             {department && (
               <button type="button" onClick={() => setDepartment("")}>
-                {department} <span aria-hidden="true">×</span>
+                {department} <Icon name="close" />
               </button>
             )}
           </div>
@@ -10041,7 +10708,7 @@ function BattlePage({
                 >
                   <i>{String.fromCharCode(65 + index)}</i>
                   <span>{option}</span>
-                  <em>{answers[question.id] === index ? "✓" : ""}</em>
+                  <em>{answers[question.id] === index && <Icon name="check" />}</em>
                 </button>
               ))}
             </div>
@@ -10358,7 +11025,7 @@ function BattlePage({
                       </strong>
                       {battle.winner_id === userId && (
                         <span className="battle-victory-check" aria-label="Victory">
-                          ✓
+                          <Icon name="check" />
                         </span>
                       )}
                       <small>
@@ -10408,22 +11075,27 @@ function PaperRow({
 }) {
   return (
     <button className="paper-row" onClick={onClick}>
-      <span className="file-tile">▤</span>
-      <span>
-        <b>Session: {paper.academic_session || "Not specified"}</b>
-        <small>
-          Department: {course.department || "Not specified"} · Level:{" "}
-          {course.level || "Not specified"}
-        </small>
-        <small>
-          Semester: {paper.semester || course.semester || "Not specified"} · Exam year:{" "}
-          {paper.exam_year ?? "Not specified"}
-        </small>
+      <span className="file-tile">
+        <Icon name="file" />
       </span>
-      <span className={`badge ${paper.is_verified ? "badge-green" : ""}`}>
-        {paper.is_verified ? "Verified paper" : "Published · not verified"}
+      <span className="paper-row-copy">
+        <span className="paper-row-course">
+          {course.code} · {course.title}
+        </span>
+        <strong className="paper-row-session">
+          {paper.academic_session || (paper.exam_year ? `${paper.exam_year} Exam` : "Past paper")}
+        </strong>
+        <span className="paper-row-meta">
+          {paper.semester && <span>{paper.semester} semester</span>}
+          {paper.exam_year && <span>{paper.exam_year} exam</span>}
+          {course.level && <span>{course.level}</span>}
+          {course.department && <span>{course.department}</span>}
+          <span className={paper.is_verified ? "verified" : "unverified"}>
+            {paper.is_verified ? "Verified" : "Not verified"}
+          </span>
+        </span>
       </span>
-      <span aria-hidden="true">›</span>
+      <Icon name="chevron-right" />
     </button>
   );
 }
@@ -10709,7 +11381,7 @@ function SourceDocumentDialog({
         <header>
           <strong>{title}</strong>
           <button type="button" onClick={onClose} aria-label="Close source viewer">
-            ×
+           <Icon name="close" />
           </button>
         </header>
         {src ? (
@@ -10876,7 +11548,7 @@ function PdfDocumentViewer({
           onClick={() => setPage((current) => Math.max(1, current - 1))}
           aria-label="Previous page"
         >
-          ‹
+          <Icon name="chevron-left" />
         </button>
         <span>
           Page {page} of {pageCount}
@@ -10887,7 +11559,7 @@ function PdfDocumentViewer({
           onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
           aria-label="Next page"
         >
-          ›
+          <Icon name="chevron-right" />
         </button>
         <i />
         <strong>{progress}% read</strong>
@@ -11028,7 +11700,7 @@ function QuizPage({
             >
               <i>{String.fromCharCode(65 + choice)}</i>
               <span>{option}</span>
-              <em>{answers[question.id] === choice ? "✓" : ""}</em>
+              <em>{answers[question.id] === choice && <Icon name="check" />}</em>
             </button>
           ))}
         </div>
@@ -11109,14 +11781,14 @@ function ResultsPage({
       <div className={`result-hero ${attempt.score_percent === 100 ? "perfect-score" : ""}`}>
         {attempt.score_percent === 100 && (
           <div className="score-celebration" aria-hidden="true">
-            <span>✦</span>
-            <span>✧</span>
-            <span>✦</span>
-            <span>✧</span>
+            <Icon name="sparkle" />
+            <Icon name="sparkle" />
+            <Icon name="sparkle" />
+            <Icon name="sparkle" />
           </div>
         )}
         <span className="result-complete-mark" aria-hidden="true">
-          ✓
+          <Icon name="check" />
         </span>
         <span className="badge badge-green">
           {attempt.score_percent === 100 ? "Perfect score · Quiz saved" : "Quiz saved"}
@@ -11323,47 +11995,72 @@ function GameProgressPanel({
   onEquipCollectible: (collectibleId: ProfileCollectibleId | null) => void;
 }) {
   const badgeDefinitions = [
-    { id: "first_steps", name: "First Steps", description: "Complete your first quiz", icon: "✦" },
+    {
+      id: "first_steps",
+      name: "First Steps",
+      description: "Complete your first quiz",
+      icon: "sparkle",
+    },
     {
       id: "comeback",
       name: "Comeback",
       description: "Improve on a previous quiz score",
-      icon: "↗",
+      icon: "trending-up",
     },
     {
       id: "helpful_contributor",
       name: "Helpful Contributor",
       description: "Share a resource approved for classmates",
-      icon: "♡",
+      icon: "heart",
     },
     {
       id: "campus_connector",
       name: "Campus Connector",
       description: "Help a classmate complete their first quiz",
-      icon: "◎",
+      icon: "target",
     },
-    { id: "first_win", name: "First Victory", description: "Win your first battle", icon: "⚔" },
+    {
+      id: "first_win",
+      name: "First Victory",
+      description: "Win your first battle",
+      icon: "swords",
+    },
     {
       id: "perfect_score",
       name: "Perfect Score",
       description: "Answer every quiz question correctly",
-      icon: "✓",
+      icon: "check",
     },
     {
       id: "speed_demon",
       name: "Speed Demon",
       description: "Perfect score at 10 seconds per question or faster",
-      icon: "↯",
+      icon: "bolt",
     },
-    { id: "daily_3", name: "3-day Starter", description: "Practice 3 days in a row", icon: "✦" },
-    { id: "daily_7", name: "7-day Scholar", description: "Practice 7 days in a row", icon: "🔥" },
+    {
+      id: "daily_3",
+      name: "3-day Starter",
+      description: "Practice 3 days in a row",
+      icon: "sparkle",
+    },
+    {
+      id: "daily_7",
+      name: "7-day Scholar",
+      description: "Practice 7 days in a row",
+      icon: "flame",
+    },
     {
       id: "daily_14",
       name: "14-day Achiever",
       description: "Practice 14 days in a row",
-      icon: "◆",
+      icon: "diamond",
     },
-    { id: "daily_30", name: "30-day Scholar", description: "Practice 30 days in a row", icon: "★" },
+    {
+      id: "daily_30",
+      name: "30-day Scholar",
+      description: "Practice 30 days in a row",
+      icon: "star",
+    },
   ] as const;
   const earnedBadgeIds = new Set(progress?.badges.map((badge) => badge.badge_id) ?? []);
   const collectibleDefinitions: Array<{
@@ -11371,35 +12068,35 @@ function GameProgressPanel({
     category: "frame" | "theme";
     name: string;
     description: string;
-    icon: string;
+    icon: IconName;
   }> = [
     {
       id: "fresh_frame",
       category: "frame",
       name: "Fresh Start",
       description: "Earned with your first quiz",
-      icon: "✦",
+      icon: "sparkle",
     },
     {
       id: "community_frame",
       category: "frame",
       name: "Community",
       description: "Earned by helping a classmate",
-      icon: "♡",
+      icon: "heart",
     },
     {
       id: "focus_theme",
       category: "theme",
       name: "Focus",
       description: "Earned with a seven-day study streak",
-      icon: "🔥",
+      icon: "flame",
     },
     {
       id: "comeback_theme",
       category: "theme",
       name: "Comeback",
       description: "Earned by improving a previous score",
-      icon: "↗",
+      icon: "trending-up",
     },
   ];
   const equippedFrame = progress?.collectibles.find(
@@ -11474,7 +12171,7 @@ function GameProgressPanel({
               )?.earned_at;
               return (
                 <article className={isEarned ? "earned" : "locked"} key={badge.id}>
-                  <span aria-hidden="true">{badge.icon}</span>
+                  <Icon name={badge.icon} />
                   <div>
                     <strong>{badge.name}</strong>
                     <small>
@@ -11485,7 +12182,11 @@ function GameProgressPanel({
                           : badge.description}
                     </small>
                   </div>
-                  {isEarned && <b aria-label="Earned">✓</b>}
+                  {isEarned && (
+                    <b aria-label="Earned">
+                      <Icon name="check" />
+                    </b>
+                  )}
                 </article>
               );
             })}
@@ -11514,7 +12215,7 @@ function GameProgressPanel({
                 );
                 return (
                   <article className={collectible ? "unlocked" : "locked"} key={definition.id}>
-                    <span aria-hidden="true">{definition.icon}</span>
+                    <Icon name={definition.icon} />
                     <div>
                       <strong>
                         {definition.name} · {definition.category === "frame" ? "Frame" : "Theme"}
@@ -11619,7 +12320,9 @@ function ContributionPage({
           <div className="contribution-list">
             {contributions.map((item) => (
               <article key={item.id}>
-                <span className="file-tile">▤</span>
+                <span className="file-tile">
+                  <Icon name="file" />
+                </span>
                 <span>
                   <b>
                     {item.course_code} · {item.exam_year}
