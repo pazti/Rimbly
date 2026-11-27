@@ -5397,6 +5397,7 @@ function App() {
               <video
                 className="welcome-cheetah"
                 src="/rimbly-cheetah-hero.mp4"
+                poster="/favicon.png"
                 autoPlay
                 loop
                 muted
