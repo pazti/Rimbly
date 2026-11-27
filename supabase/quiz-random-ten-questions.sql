@@ -126,10 +126,7 @@ begin
       )
       and question.review_status = 'approved'
       and question.correct_index is not null
-    order by hashtextextended(
-      question.id::text || (now() at time zone 'UTC')::date::text,
-      0
-    )
+    order by random()
     limit 10;
 end;
 $$;

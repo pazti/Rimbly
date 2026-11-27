@@ -68,8 +68,10 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    today's completed practice from the monetization status function.
 8. Apply `harden-submission-workflows.sql` after `quiz-learning-ux.sql` and
    `quiz-attempt-review.sql`, then apply `quiz-question-bank-protection.sql`.
-   This final migration limits the student question RPC to ten approved
-   questions, even if an earlier quiz migration defined it without a limit.
+   This final migration randomly selects ten approved questions from the quiz's
+   linked question bank on each fetch and limits post-quiz answer review to the
+   questions in that attempt, even if an earlier quiz migration defined them
+   without those limits. Random selection can still repeat questions by chance.
 9. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate. Then apply `guest-explore.sql` to expose a bounded,
    read-only course and reviewed-quiz catalog to signed-out visitors. The public

@@ -13,7 +13,7 @@ returns table (
   explanation text
 )
 language plpgsql
-stable
+volatile
 security definer
 set search_path = pg_catalog, public
 as $$
@@ -54,10 +54,7 @@ begin
       )
       and question.review_status = 'approved'
       and question.correct_index is not null
-    order by hashtextextended(
-      question.id::text || (now() at time zone 'UTC')::date::text,
-      0
-    )
+    order by random()
     limit 10;
 end;
 $$;
