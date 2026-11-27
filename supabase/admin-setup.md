@@ -6,7 +6,10 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
 1. Confirm the application tables used by Rimbly exist in the Supabase project.
 2. Run `admin-foundation.sql` if the initial RBAC/review migration has not already
    been applied.
-3. Run `admin-management.sql`.
+3. Run `admin-management.sql`, then run `admin-notifications.sql`. It adds
+   notification inbox invitations for existing students promoted to Admin and
+   an audited broadcast composer for administrators with student-management
+   permission.
 4. Run `quiz-battles.sql` to enable paper-linked question authoring, per-question
    review, quiz attempts, one-on-one battles, points, streaks, titles, university
    leaderboards, and case-insensitive course-code uniqueness within each
@@ -64,7 +67,9 @@ re-run the core waitlist SQL as a substitute for the Rimbly application schema.
    card also reads the weekly quiz allowance, daily battle allowance, and
    today's completed practice from the monetization status function.
 8. Apply `harden-submission-workflows.sql` after `quiz-learning-ux.sql` and
-   `quiz-attempt-review.sql`.
+   `quiz-attempt-review.sql`, then apply `quiz-question-bank-protection.sql`.
+   This final migration limits the student question RPC to ten approved
+   questions, even if an earlier quiz migration defined it without a limit.
 9. Run `maintenance-mode.sql` to enable the scheduled maintenance page and
    database access gate. Then apply `guest-explore.sql` to expose a bounded,
    read-only course and reviewed-quiz catalog to signed-out visitors. The public
@@ -146,11 +151,15 @@ supabase secrets set --project-ref YOUR_PROJECT_REF \
     user. Do not assign privileged roles from client-side profile metadata.
 
 The workspace provides the overview, contribution queue, direct paper upload,
-student search and suspend/restore controls, team invitations and access
-management, university directory creation, audit-log views, and Super Admin-only
-scheduled maintenance controls. While maintenance is active, only active
+student search, suspend/restore and Admin invitation controls, audited all-user
+notifications, team invitations and access management, university directory
+creation, audit-log views, and Super Admin-only scheduled maintenance controls.
+Student Admin invitations arrive in the recipient's Notifications tab and must
+be accepted before access activates. While maintenance is active, only active
 Super Admins can use the full website. Everyone else sees the countdown page;
-the database applies the same Super Admin exception to app data access. Team invites activate only after the invited user signs in with the invited, verified email.
+the database applies the same Super Admin exception to app data access. Team
+invitations activate only after the invited user accepts while signed in with
+the invited, verified email.
 
 Super Admins can edit past-paper metadata and replace its source file from the Past
 Questions admin section. Course metadata is shared by all papers for that course;

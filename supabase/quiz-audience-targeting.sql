@@ -415,7 +415,8 @@ begin
       )
       and question.review_status = 'approved'
       and question.correct_index is not null
-    order by question.position;
+    order by question.position
+    limit 10;
 end;
 $$;
 
@@ -452,20 +453,28 @@ begin
     raise exception 'This quiz is not published';
   end if;
 
-  select count(*) into question_total
-  from public.quiz_set_questions question
-  where question.quiz_id = p_quiz_id
-    and question.paper_id is not distinct from (
-      select quiz.paper_id from public.quiz_sets quiz where quiz.id = p_quiz_id
-    )
-    and question.review_status = 'approved'
-    and question.correct_index is not null;
-  if question_total = 0 or (select count(*) from jsonb_object_keys(p_answers)) <> question_total then
-    raise exception 'Answer every question before submitting';
+  question_total := (select count(*)::integer from jsonb_object_keys(p_answers));
+  if question_total <> 10 then
+    raise exception 'A quiz attempt must contain exactly 10 answers';
+  end if;
+
+  if (
+    select count(*)
+    from jsonb_object_keys(p_answers) answer_key
+    join public.quiz_set_questions question on question.id = answer_key::uuid
+    where question.quiz_id = p_quiz_id
+      and question.paper_id is not distinct from (
+        select quiz.paper_id from public.quiz_sets quiz where quiz.id = p_quiz_id
+      )
+      and question.review_status = 'approved'
+      and question.correct_index is not null
+  ) <> question_total then
+    raise exception 'Answers must match the approved questions in this quiz';
   end if;
   for quiz_question in
     select question.id, question.correct_index
-    from public.quiz_set_questions question
+    from jsonb_object_keys(p_answers) answer_key
+    join public.quiz_set_questions question on question.id = answer_key::uuid
     where question.quiz_id = p_quiz_id
       and question.paper_id is not distinct from (
         select quiz.paper_id from public.quiz_sets quiz where quiz.id = p_quiz_id

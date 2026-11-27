@@ -83,6 +83,9 @@ import {
   setMaintenanceStatus,
   setAdminStudentSuspension,
   updateAdminTeamMember,
+  inviteStudentAsAdmin,
+  sendAdminBroadcastNotification,
+  markNotificationRead,
   getLeaderboard,
   getDailyChallengeLeaderboard,
   getGameProgress,
@@ -5022,6 +5025,39 @@ function App() {
     }
   };
 
+  const handleAcceptAdminInvitation = async (notificationId: string) => {
+    if (!user) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const acceptedAccess = await getAdminAccess();
+      if (!acceptedAccess) {
+        throw new Error("This invitation could not be accepted for the signed-in account.");
+      }
+      setAdminAccess(acceptedAccess);
+      setAdminAccessLoaded(true);
+      setAdminAccessError(null);
+      setNotifications((current) =>
+        current.map((item) =>
+          item.id === notificationId ? { ...item, read_at: new Date().toISOString() } : item,
+        ),
+      );
+      setNotice("Admin invitation accepted. Your access is now active.");
+      try {
+        await markNotificationRead(user.id, notificationId);
+      } catch (markError) {
+        setError(
+          `Admin access is active, but the invitation notification could not be marked as read: ${getErrorMessage(markError, "Please refresh and try again.")}`,
+        );
+      }
+    } catch (acceptError) {
+      setError(getErrorMessage(acceptError, "Could not accept this admin invitation."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleSignOut = async () => {
     if (!supabase) return;
     setBusy(true);
@@ -6567,6 +6603,15 @@ function App() {
                   <b>{item.title}</b>
                   <p>{item.body}</p>
                   <small>{new Date(item.created_at).toLocaleString()}</small>
+                  {item.type === "admin_invitation" && !adminAccess && (
+                    <Button
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => void handleAcceptAdminInvitation(item.id)}
+                    >
+                      {busy ? "Accepting…" : "Accept admin invitation"}
+                    </Button>
+                  )}
                 </article>
               ))}
             </div>
@@ -7378,6 +7423,7 @@ function AdminWorkspace({
     | "papers"
     | "quizzes"
     | "students"
+    | "broadcast"
     | "team"
     | "ambassadors"
     | "academics"
@@ -7755,6 +7801,72 @@ function AdminWorkspace({
     }
   };
 
+  const handleStudentAdminInvite = async (student: AdminStudent) => {
+    if (!canManageTeam) {
+      setError("Team management permission is required to invite an admin.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Invite ${student.full_name || student.email} as an Admin? They will receive an invitation in their Rimbly Notifications tab and must accept it before access is active.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusyId(student.user_id);
+    setError(null);
+    setNotice(null);
+    try {
+      await inviteStudentAsAdmin(student.user_id, student.email);
+      setStudents((current) => current.filter((item) => item.user_id !== student.user_id));
+      setNotice(`Admin invitation sent to ${student.email}.`);
+      try {
+        setStudents(await getAdminStudents(studentSearch));
+      } catch (refreshError) {
+        setError(
+          `The invitation was sent, but the student list could not refresh: ${getErrorMessage(refreshError, "Please reload the page.")}`,
+        );
+      }
+    } catch (inviteError) {
+      setError(getErrorMessage(inviteError, "Could not invite this student as an admin."));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleBroadcastNotification = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const title = String(values.get("title") ?? "").trim();
+    const body = String(values.get("body") ?? "").trim();
+    if (!title || !body) {
+      setError("Enter both a notification title and message.");
+      return;
+    }
+    if (
+      !window.confirm(
+        "Send this notification to every registered Rimbly user? This action cannot be undone.",
+      )
+    ) {
+      return;
+    }
+
+    setBusyId("broadcast");
+    setError(null);
+    setNotice(null);
+    try {
+      const recipientCount = await sendAdminBroadcastNotification(title, body);
+      form.reset();
+      setNotice(`Notification sent to ${recipientCount.toLocaleString()} users.`);
+    } catch (sendError) {
+      setError(getErrorMessage(sendError, "Could not send this notification."));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleAdminPaperUpload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -7992,6 +8104,7 @@ function AdminWorkspace({
     { key: "papers", label: "Past questions", visible: canManagePapers },
     { key: "quizzes", label: "Quiz authoring", visible: canManageQuizzes },
     { key: "students", label: "Students", visible: canManageStudents },
+    { key: "broadcast", label: "Notifications", visible: canManageStudents },
     { key: "team", label: "Team", visible: canManageTeam },
     { key: "ambassadors", label: "Ambassadors", visible: canManageAmbassadors },
     { key: "academics", label: "Academics", visible: canManageAcademics },
@@ -8422,11 +8535,70 @@ function AdminWorkspace({
                             ? "Restore"
                             : "Suspend"}
                       </button>
+                      {canManageTeam && (
+                        <button
+                          className="btn btn-secondary"
+                          disabled={busyId === student.user_id || student.suspended}
+                          onClick={() => void handleStudentAdminInvite(student)}
+                        >
+                          {busyId === student.user_id ? "Sending…" : "Invite as Admin"}
+                        </button>
+                      )}
                     </article>
                   ))
                 ) : (
                   <EmptyState title="No matching students" text="Try another name or email." />
                 )}
+              </section>
+            )}
+            {section === "broadcast" && canManageStudents && (
+              <section className="admin-review-list">
+                <div className="admin-section-heading">
+                  <div>
+                    <span className="eyebrow">Platform updates</span>
+                    <h2>Send a notification</h2>
+                  </div>
+                </div>
+                <form
+                  className="admin-invite-form"
+                  onSubmit={(event) => void handleBroadcastNotification(event)}
+                >
+                  <div>
+                    <h3>Notify every registered user</h3>
+                    <p>
+                      This message will appear in the Notifications tab for all Rimbly accounts.
+                      Sending cannot be undone.
+                    </p>
+                  </div>
+                  <label>
+                    <span>Title</span>
+                    <input
+                      name="title"
+                      required
+                      maxLength={100}
+                      placeholder="A short, clear headline"
+                    />
+                  </label>
+                  <label>
+                    <span>Message</span>
+                    <textarea
+                      name="body"
+                      required
+                      maxLength={1000}
+                      rows={5}
+                      placeholder="Write the message users will see in their notification inbox."
+                    />
+                  </label>
+                  <div className="admin-invite-actions">
+                    <button
+                      className="btn btn-primary"
+                      type="submit"
+                      disabled={busyId === "broadcast"}
+                    >
+                      {busyId === "broadcast" ? "Sending…" : "Send to all users"}
+                    </button>
+                  </div>
+                </form>
               </section>
             )}
             {section === "team" && (

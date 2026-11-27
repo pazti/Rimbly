@@ -6820,6 +6820,7 @@ select {
 .admin-form select,
 .admin-invite-form input,
 .admin-invite-form select,
+.admin-invite-form textarea,
 .admin-team-actions select,
 .admin-inline-form input {
   width: 100%;
@@ -6828,6 +6829,11 @@ select {
   border: 1px solid #d6d1cc;
   border-radius: 9px;
   background: #fff;
+}
+
+.admin-invite-form textarea {
+  resize: vertical;
+  line-height: 1.6;
 }
 
 .admin-invite-form > div:first-child h3,

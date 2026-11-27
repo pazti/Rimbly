@@ -340,6 +340,7 @@ export interface AppNotification {
   id: string;
   title: string;
   body: string;
+  type: string;
   read_at: string | null;
   created_at: string;
 }
@@ -1441,11 +1442,21 @@ export async function toggleSavedCourse(userId: string, courseId: string, saved:
 export async function getNotifications(userId: string) {
   const { data, error } = await requireSupabase()
     .from("notifications")
-    .select("id, title, body, read_at, created_at")
+    .select("id, title, body, type, read_at, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as AppNotification[];
+}
+
+export async function markNotificationRead(userId: string, notificationId: string) {
+  const { error } = await requireSupabase()
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("id", notificationId)
+    .eq("user_id", userId)
+    .is("read_at", null);
+  if (error) throw error;
 }
 
 export async function markNotificationsRead(userId: string) {
@@ -1737,6 +1748,24 @@ export async function getAdminTeam() {
   const { data, error } = await requireSupabase().rpc("admin_list_team");
   if (error) throw error;
   return (data ?? []) as AdminTeamMember[];
+}
+
+export async function inviteStudentAsAdmin(userId: string, email: string) {
+  const { error } = await requireSupabase().rpc("admin_record_invitation", {
+    p_user_id: userId,
+    p_email: email,
+    p_role_id: "admin",
+  });
+  if (error) throw error;
+}
+
+export async function sendAdminBroadcastNotification(title: string, body: string) {
+  const { data, error } = await requireSupabase().rpc("admin_send_broadcast_notification", {
+    p_title: title,
+    p_body: body,
+  });
+  if (error) throw error;
+  return data as number;
 }
 
 export async function updateAdminTeamMember(
