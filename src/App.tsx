@@ -1,4 +1,5 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Session } from "@supabase/supabase-js";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
@@ -2280,6 +2281,7 @@ function DailyGoalCard({
   showAction = true,
   onQuiz,
   onPlans,
+  onPricing,
 }: {
   status: RimblyBillingStatus | null;
   progress: GameProgress | null;
@@ -2289,6 +2291,7 @@ function DailyGoalCard({
   showAction?: boolean;
   onQuiz: () => void;
   onPlans: () => void;
+  onPricing: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -2451,7 +2454,7 @@ function DailyGoalCard({
         </div>
         {showAction && (
           <div className="daily-goal-actions">
-            <Button onClick={weeklyQuizLimitReached ? onPlans : onQuiz}>
+            <Button onClick={weeklyQuizLimitReached ? onPricing : onQuiz}>
               {weeklyQuizLimitReached
                 ? "Get unlimited quizzes"
                 : didPractice
@@ -3432,6 +3435,145 @@ function SubscriptionPage({
   );
 }
 
+function PricingModal({
+  loading,
+  error,
+  checkoutBusy,
+  isPro,
+  onChoosePlan,
+  onClose,
+}: {
+  loading: boolean;
+  error: string | null;
+  checkoutBusy: boolean;
+  isPro: boolean;
+  onChoosePlan: (planId: RimblyPlanId) => void;
+  onClose: () => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="pro-reminder-backdrop pricing-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="pricing-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pricing-modal-title"
+        aria-describedby="pricing-modal-description"
+      >
+        <header className="pricing-modal-header">
+          <div>
+            <span className="eyebrow">Your free weekly quiz limit is reached</span>
+            <h2 id="pricing-modal-title">Keep your study momentum going.</h2>
+            <p id="pricing-modal-description">
+              Get unlimited quizzes and more with a one-time Rimbly Pro plan. Choose the duration
+              that works for you.
+            </p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            className="pro-reminder-close"
+            type="button"
+            aria-label="Close pricing"
+            onClick={onClose}
+          >
+            <Icon name="close" />
+          </button>
+        </header>
+        {error && (
+          <p className="app-feedback pricing-modal-error" role="alert">
+            Checkout unavailable: {error}
+          </p>
+        )}
+        <div className="billing-plan-grid pricing-modal-plans">
+          {rimblyProPlans.map((plan) => (
+            <article
+              className={`billing-plan-card ${plan.id === "semester" ? "featured" : ""}`}
+              key={plan.id}
+            >
+              {plan.id === "semester" && <span className="badge badge-purple">Best value</span>}
+              <h3>{plan.name}</h3>
+              <strong className="billing-price">₦{plan.priceNaira.toLocaleString("en-NG")}</strong>
+              <small>for {plan.duration}</small>
+              <Button
+                disabled={checkoutBusy || loading}
+                onClick={() => onChoosePlan(plan.id)}
+              >
+                {checkoutBusy
+                  ? "Opening checkout…"
+                  : isPro
+                    ? "Add time"
+                    : `Choose ${plan.name}`}
+              </Button>
+            </article>
+          ))}
+        </div>
+        <section className="pricing-modal-benefits" aria-label="Rimbly Pro includes">
+          <h3>Every plan includes</h3>
+          <ul>
+            <li>Unlimited quiz submissions and battle invites</li>
+            <li>Full past-question library access while your plan is active</li>
+            <li>30-day performance insights</li>
+            <li>Pro Scholar profile and leaderboard flair</li>
+          </ul>
+        </section>
+        <p className="pricing-modal-free-note">
+          Free Forever remains available with 3 quiz submissions per week, 3 battle invites per day,
+          and 3 free past-paper unlocks.
+        </p>
+        <p className="billing-disclaimer pricing-modal-disclaimer">
+          One-time payment per term · No automatic renewals · Secure checkout hosted by Flutterwave.
+        </p>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 function LibraryPlanAccess() {
   const [status, setStatus] = useState<LibraryAccessStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -3633,6 +3775,8 @@ function App() {
   const [billingStatusLoading, setBillingStatusLoading] = useState(true);
   const [billingStatusError, setBillingStatusError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [pricingModalOpen, setPricingModalOpen] = useState(false);
+  const closePricingModal = useCallback(() => setPricingModalOpen(false), []);
   const [libraryAccessStatus, setLibraryAccessStatus] = useState<LibraryAccessStatus | null>(null);
   const updateLibraryAccessStatus = useCallback((result: LibraryDocumentAccessResult) => {
     setLibraryAccessStatus({
@@ -5551,6 +5695,7 @@ function App() {
               dailyChallenge ? void startQuiz(dailyChallenge.id) : navigate("quiz-setup")
             }
             onPlans={() => navigate("subscription")}
+            onPricing={() => setPricingModalOpen(true)}
           />
           <LearningProgressCard
             attempts={attempts}
@@ -6665,6 +6810,16 @@ function App() {
       >
         {content}
       </AppShell>
+      {pricingModalOpen && (
+        <PricingModal
+          loading={billingStatusLoading}
+          error={billingStatusError}
+          checkoutBusy={checkoutBusy}
+          isPro={Boolean(billingStatus?.is_pro)}
+          onChoosePlan={(planId) => void startProCheckout(planId)}
+          onClose={closePricingModal}
+        />
+      )}
       {sourceToRead && (
         <SourceDocumentDialog
           path={sourceToRead.path}

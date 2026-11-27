@@ -8393,6 +8393,96 @@ select {
   font-size: 10px;
 }
 
+.pricing-modal-backdrop {
+  z-index: 1200;
+}
+
+.pricing-modal {
+  position: relative;
+  width: min(100%, 880px);
+  max-height: min(92dvh, 820px);
+  overflow-y: auto;
+  padding: clamp(22px, 4vw, 38px);
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: 0 28px 90px rgb(18 12 35 / 28%);
+  animation: pro-reminder-arrive 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.pricing-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-right: 42px;
+}
+
+.pricing-modal-header h2 {
+  margin: 8px 0;
+  font-size: clamp(26px, 4vw, 36px);
+  letter-spacing: -0.04em;
+}
+
+.pricing-modal-header p {
+  max-width: 580px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.pricing-modal-plans {
+  margin-top: 24px;
+}
+
+.pricing-modal-plans .billing-plan-card {
+  min-width: 0;
+  padding: clamp(14px, 2vw, 20px);
+}
+
+.pricing-modal-benefits {
+  margin-top: 20px;
+  padding: 18px 20px;
+  border: 1px solid #e3d8f6;
+  border-radius: 14px;
+  background: #faf7ff;
+}
+
+.pricing-modal-benefits h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.pricing-modal-benefits ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 20px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.pricing-modal-disclaimer {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.pricing-modal-free-note {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.pricing-modal-error {
+  margin: 16px 0 0;
+}
+
 @keyframes pro-reminder-fade-in {
   from {
     opacity: 0;
@@ -8490,6 +8580,78 @@ select {
     padding: 12px;
   }
 
+  .pricing-modal-backdrop {
+    align-items: center;
+    padding: 12px;
+  }
+
+  .pricing-modal {
+    max-height: 94dvh;
+    padding: 22px 18px;
+    border-radius: 18px;
+  }
+
+  .pricing-modal-header {
+    padding-right: 34px;
+  }
+
+  .pricing-modal-header .eyebrow {
+    font-size: 9px;
+  }
+
+  .pricing-modal-header h2 {
+    font-size: 26px;
+  }
+
+  .pricing-modal-plans {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pricing-modal-plans .billing-plan-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 14px;
+  }
+
+  .pricing-modal-plans .billing-plan-card .badge {
+    grid-column: 1 / -1;
+  }
+
+  .pricing-modal-plans .billing-plan-card h3,
+  .pricing-modal-plans .billing-plan-card > small {
+    grid-column: 1;
+  }
+
+  .pricing-modal-plans .billing-price {
+    grid-column: 1;
+    grid-row: 2;
+    font-size: 24px;
+  }
+
+  .pricing-modal-plans .billing-plan-card > small {
+    margin: 0;
+  }
+
+  .pricing-modal-plans .billing-plan-card .btn {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    width: auto;
+    min-width: 116px;
+    margin: 0;
+    padding: 0 12px;
+    font-size: 11px;
+  }
+
+  .pricing-modal-benefits {
+    padding: 15px;
+  }
+
+  .pricing-modal-benefits ul {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .pro-reminder-dialog {
     width: 100%;
     max-height: min(90dvh, 680px);
@@ -8554,7 +8716,8 @@ select {
 
 @media (prefers-reduced-motion: reduce) {
   .pro-reminder-backdrop,
-  .pro-reminder-dialog {
+  .pro-reminder-dialog,
+  .pricing-modal {
     animation: none;
   }
 }
